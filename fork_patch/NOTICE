@@ -1,0 +1,17 @@
+QGIS MCP — Aviso de atribución
+==============================
+
+Este producto incluye software desarrollado por:
+
+  • Nicolas Karasiak — Proyecto original "qgis-mcp" (plugin de QGIS y servidor
+    MCP). https://github.com/nkarasiak/qgis-mcp — Licencia MIT, © 2025.
+
+Mejoras y trabajo derivado:
+
+  • Luis Ferrer — Instalador ETL (aprovisionamiento de Claude Desktop, QGIS
+    3.44 LTR, dependencias de Python, despliegue y configuración), unificación
+    de licencia a MIT y atribución. © 2026 — Licencia MIT.
+
+El uso, copia, modificación y distribución de este software se rige por la
+licencia MIT incluida en el archivo LICENSE. Conserva este aviso NOTICE y el
+copyright original en cualquier redistribución.

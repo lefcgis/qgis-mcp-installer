@@ -1,0 +1,21 @@
+# Artefactos de construcción (SignPath/CI los genera desde el código)
+dist/
+build/
+*.exe
+*.spec.bak
+
+# Firma / secretos — nunca subir
+*.pfx
+*.snk
+*.key
+
+# Logs generados por el instalador
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/

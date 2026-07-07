@@ -1,0 +1,6 @@
+# Dependencias SOLO para construir el .exe (no para ejecutar el ETL).
+# El ETL en sí (etl_installer.py) usa únicamente la librería estándar de Python,
+# así que no tiene dependencias de runtime.
+#
+# Fijadas y actualizadas al 2026-07-05. PyInstaller 6.x es la rama estable.
+pyinstaller>=6.11.0,<7.0.0
