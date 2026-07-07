@@ -7,6 +7,14 @@ Empaquetable como un único `.exe` para que el usuario final no tenga que instal
 Python ni manejar archivos sueltos — pero **sin ofuscación ni evasión**: el código
 que va dentro es exactamente el de este repositorio, publicado y verificable.
 
+## Code signing
+
+Free code signing for the Windows installer (`.exe`) is provided by
+[SignPath.io](https://signpath.io), with a certificate by the
+[SignPath Foundation](https://signpath.org). Signed releases are published on the
+project's [GitHub Releases](https://github.com/lefcgis/qgis-mcp-installer/releases)
+page together with their SHA-256 hash.
+
 ## Qué hace (los 6 pasos del ETL)
 
 | Paso | Acción | Cómo |
