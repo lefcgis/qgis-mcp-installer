@@ -1,5 +1,7 @@
 # QGIS MCP — Instalador ETL
 
+> 🇧🇷 [Leia esta documentação em português](README_pt-BR.md) · 🇪🇸 Estás leyendo la versión en español.
+
 Instalador **transparente y auditable** que aprovisiona de cero un equipo Windows
 para usar **QGIS** con **Claude AI** vía el Model Context Protocol (MCP).
 
