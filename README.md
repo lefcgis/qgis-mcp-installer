@@ -32,7 +32,7 @@ Get-FileHash .\qgis-mcp-installer.exe -Algorithm SHA256
 | Paso | Acción | Cómo |
 |------|--------|------|
 | 1 | Instala **Claude Desktop** | Descarga el instalador oficial (win x64) y lo ejecuta en silencio |
-| 2 | Instala **QGIS 3.44 LTR** | Descarga el MSI OSGeo4W oficial y lo instala con `msiexec` |
+| 2 | Instala **QGIS 3.44 LTR** | Con admin: MSI oficial vía `msiexec`. **Sin admin: OSGeo4W en tu carpeta de usuario (cero UAC)** |
 | 3 | Instala **dependencias de Python** | Crea un **venv aislado** con librerías fijadas y actualizadas |
 | 4 | Obtiene el **plugin QGIS MCP** | Descarga el fork mejorado de tu GitHub (con fallback al upstream) |
 | 5 | Configura **QGIS** | Copia el plugin al perfil y lo habilita en `QGIS3.ini` |
@@ -40,6 +40,27 @@ Get-FileHash .\qgis-mcp-installer.exe -Algorithm SHA256
 
 *Extract* = descargas · *Transform* = verificación de integridad + preparación ·
 *Load* = instalación y configuración.
+
+## Sin permisos de administrador: no hay problema
+
+**No necesitas ser administrador del equipo.** Si QGIS no está instalado, el
+paso 2 detecta automáticamente tus permisos:
+
+- **Con administrador** → instala el MSI oficial de QGIS (a nivel máquina,
+  en `C:\Program Files`), como siempre.
+- **Sin administrador** → usa el **instalador de red OSGeo4W oficial** (firmado
+  por la OSGeo Foundation y verificado antes de ejecutarse) para instalar el
+  mismo QGIS LTR completo (`qgis-ltr-full`: Python, GDAL, GRASS, processing)
+  dentro de **tu carpeta de usuario** (`<raíz>/qgis`). Cero ventanas de UAC.
+
+También puedes forzar la vía con `--qgis-install msi|user|auto` (por defecto
+`auto`). Claude Desktop siempre se instala por-usuario, así que **el flujo
+completo funciona de punta a punta sin elevación**:
+
+```bash
+# instalación completa garantizada sin administrador
+python etl_installer.py --qgis-install user
+```
 
 ## Detección: no reinstala lo que ya tienes
 

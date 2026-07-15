@@ -7,7 +7,8 @@ Aprovisiona de cero un equipo Windows para usar QGIS con Claude AI vía el
 Model Context Protocol, en 6 pasos:
 
     1. Claude Desktop         (descarga + instala)
-    2. QGIS 3.44 LTR          (descarga + instala)
+    2. QGIS 3.44 LTR          (descarga + instala; SIN admin usa OSGeo4W
+                               en la carpeta del usuario — cero UAC)
     3. Dependencias de Python (venv aislado con librerías fijadas)
     4. Plugin QGIS MCP        (descarga el fork mejorado + lo despliega)
     5. Configura QGIS         (habilita el plugin en el perfil)
@@ -129,8 +130,15 @@ class Config:
     non_interactive: bool
     skip_signature: bool
     plugin_url: str
+    qgis_install: str = "auto"  # auto | msi (requiere admin) | user (sin admin)
     assume_installed: set[str] = field(default_factory=set)  # {'claude','qgis'}
     status: dict[int, str] = field(default_factory=dict)     # etiqueta por paso
+
+    @property
+    def user_qgis_root(self) -> Path:
+        """Raíz de la instalación de QGIS SIN administrador (OSGeo4W en la
+        carpeta del usuario). Solo se usa si el paso 2 corre en modo 'user'."""
+        return self.base_dir / "qgis"
 
     @property
     def claude_config_path(self) -> Path:
@@ -312,8 +320,13 @@ def detect_claude() -> tuple[bool, str | None, Path | None]:
     return False, None, None
 
 
-def detect_qgis() -> tuple[bool, str | None, Path | None]:
-    """Busca una instalación de QGIS y su versión."""
+def detect_qgis(extra_roots: tuple[Path, ...] = ()) -> tuple[bool, str | None, Path | None]:
+    """Busca una instalación de QGIS y su versión.
+
+    Cubre las instalaciones a nivel máquina (Program Files, C:\\OSGeo4W) y las
+    de nivel usuario (OSGeo4W en el home o en la raíz elegida por el usuario,
+    que es donde instala el paso 2 en modo sin-administrador).
+    """
     roots = [
         Path(os.environ.get("ProgramFiles", r"C:\Program Files")),
         Path(r"C:\Program Files"),
@@ -328,10 +341,24 @@ def detect_qgis() -> tuple[bool, str | None, Path | None]:
             if (d / "bin").exists():
                 ver = d.name.replace("QGIS", "").strip() or None
                 return True, ver, d
-    for p in (Path(r"C:\OSGeo4W"), Path(r"C:\OSGeo4W64")):
-        if (p / "bin" / "qgis-bin.exe").exists():
+    o4w_roots = (*extra_roots, Path.home() / "OSGeo4W",
+                 Path(r"C:\OSGeo4W"), Path(r"C:\OSGeo4W64"))
+    for p in o4w_roots:
+        bin_dir = p / "bin"
+        if bin_dir.exists() and any(bin_dir.glob("qgis*-bin.exe")):
             return True, None, p
     return False, None, None
+
+
+def _is_admin() -> bool:
+    """True si el proceso corre con permisos de administrador (Windows)."""
+    if sys.platform != "win32":
+        return os.geteuid() == 0 if hasattr(os, "geteuid") else False
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
 
 
 def _version_tuple(v: str | None) -> tuple[int, ...]:
@@ -385,13 +412,14 @@ def confirm_installed(name: str, key: str,
 # Resolución de intérprete Python / uv (crítico al correr como .exe congelado)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _real_python() -> str | None:
+def _real_python(extra_qgis_roots: tuple[Path, ...] = ()) -> str | None:
     """Devuelve un intérprete de Python REAL.
 
     Al ejecutarse como .exe de PyInstaller, `sys.executable` es el PROPIO
     instalador, no Python — así que no sirve para crear un venv. En ese caso
     buscamos un Python de verdad: primero en el PATH (py/python), luego el que
-    QGIS trae empaquetado (siempre presente tras el paso 2).
+    QGIS trae empaquetado (siempre presente tras el paso 2), incluyendo las
+    instalaciones sin-admin (OSGeo4W en carpeta del usuario).
     """
     if not getattr(sys, "frozen", False):
         return sys.executable  # ejecución normal: el intérprete actual vale
@@ -399,6 +427,10 @@ def _real_python() -> str | None:
         exe = shutil.which(cand)
         if exe and "qgis-mcp-installer" not in exe.lower():
             return exe
+    for root in (*extra_qgis_roots, Path.home() / "OSGeo4W",
+                 Path(r"C:\OSGeo4W")):
+        for p in sorted((root / "apps").glob("Python*/python.exe"), reverse=True):
+            return str(p)
     for base in (Path(os.environ.get("ProgramFiles", r"C:\Program Files")),
                  Path(r"C:\Program Files")):
         if not base.exists():
@@ -466,7 +498,8 @@ def step1_claude_desktop(cfg: Config, log: Logger) -> bool:
 
 def step2_qgis(cfg: Config, log: Logger) -> bool:
     log.step(2, f"QGIS {manifest.QGIS_VERSION} LTR")
-    has, ver = confirm_installed("QGIS", "qgis", detect_qgis(), cfg, log)
+    has, ver = confirm_installed(
+        "QGIS", "qgis", detect_qgis((cfg.user_qgis_root,)), cfg, log)
     if has:
         cfg.status[2] = f"ya presente{f' (v{ver})' if ver else ''}"
         if _version_tuple(ver) and _version_tuple(ver) < (3, 28):
@@ -475,6 +508,26 @@ def step2_qgis(cfg: Config, log: Logger) -> bool:
         log.ok(f"Usas tu QGIS existente{f' (v{ver})' if ver else ''}. "
                "Se omite la instalación; el plugin se desplegará en tu perfil.")
         return True
+
+    # Elegir la vía de instalación. El MSI oficial instala a nivel máquina y
+    # EXIGE administrador; sin admin usamos el instalador de red OSGeo4W con
+    # --root en la carpeta del usuario (misma QGIS LTR, cero elevación).
+    mode = cfg.qgis_install
+    if mode == "auto":
+        if _is_admin():
+            mode = "msi"
+            log.info("Tienes permisos de administrador → instalación estándar (MSI).")
+        else:
+            mode = "user"
+            log.info("Sin permisos de administrador → QGIS se instalará en tu "
+                     "carpeta de usuario (OSGeo4W, no requiere elevación).")
+    if mode == "msi":
+        return _install_qgis_msi(cfg, log)
+    return _install_qgis_user(cfg, log)
+
+
+def _install_qgis_msi(cfg: Config, log: Logger) -> bool:
+    """Vía clásica: MSI oficial de QGIS (requiere administrador/UAC)."""
     installer = fetch_verified(manifest.QGIS_LTR, cfg, log)
     if installer is None:
         return False
@@ -486,10 +539,62 @@ def step2_qgis(cfg: Config, log: Logger) -> bool:
         ["msiexec", "/i", str(installer), "/qb", "/norestart"]
     ).returncode
     if rc in (0, 3010):  # 3010 = éxito, requiere reinicio
-        cfg.status[2] = "instalado"
+        cfg.status[2] = "instalado (MSI)"
         log.ok("QGIS instalado.")
         return True
     log.err(f"msiexec devolvió código {rc}.")
+    if rc in (1602, 1603, 1625, 1730):
+        log.warn("Ese código suele indicar falta de permisos de administrador. "
+                 "Reintenta con --qgis-install user para instalar QGIS en tu "
+                 "carpeta de usuario SIN administrador.")
+    return False
+
+
+def _install_qgis_user(cfg: Config, log: Logger) -> bool:
+    """Vía SIN administrador: instalador de red OSGeo4W con --root del usuario.
+
+    Es el mismo QGIS LTR oficial (paquete qgis-ltr-full, con Python/GDAL/
+    processing); la diferencia es que vive en una carpeta del usuario en vez de
+    Program Files, así que no hay UAC. El propio setup queda verificado por
+    firma Authenticode de la OSGeo Foundation antes de ejecutarse.
+    """
+    setup = fetch_verified(manifest.OSGEO4W_SETUP, cfg, log)
+    if setup is None:
+        return False
+    root = cfg.user_qgis_root
+    pkg_cache = cfg.downloads_dir / "osgeo4w-packages"
+    cmd = [
+        str(setup),
+        "--advanced", "--arch", "x86_64",
+        "--quiet-mode", "--autoaccept",
+        "--site", manifest.OSGEO4W_SITE, "--only-site",
+        "--root", str(root),
+        "--local-package-dir", str(pkg_cache),
+        "--packages", manifest.OSGEO4W_PACKAGES,
+        "--menu-name", "QGIS LTR (usuario)",
+    ]
+    if cfg.dry_run:
+        log.info(f"[dry-run] instalaría QGIS sin admin en {root} con:")
+        log.info("  " + " ".join(cmd))
+        return True
+    log.info(f"Instalando QGIS LTR en {root} (sin administrador)…")
+    log.info("Primera vez: descarga ~1.5 GB del repositorio oficial de OSGeo. "
+             "Puede tardar varios minutos según tu conexión.")
+    root.mkdir(parents=True, exist_ok=True)
+    pkg_cache.mkdir(parents=True, exist_ok=True)
+    rc = subprocess.run(cmd).returncode
+    qgis_bin = next((root / "bin").glob("qgis*-bin.exe"), None) \
+        if (root / "bin").exists() else None
+    if rc == 0 and qgis_bin is not None:
+        cfg.status[2] = f"instalado sin admin en {root}"
+        log.ok(f"QGIS LTR instalado en {root} (binario: {qgis_bin.name}).")
+        log.info("Ábrelo desde el menú Inicio ('QGIS LTR (usuario)') o con "
+                 f"{root / 'bin' / 'qgis-ltr.bat'}")
+        return True
+    log.err(f"OSGeo4W setup devolvió código {rc}"
+            + ("" if qgis_bin else " y no se encontró el binario de QGIS")
+            + ". Revisa el log de OSGeo4W en "
+            + str(root / "var" / "log" / "setup.log.full"))
     return False
 
 
@@ -503,7 +608,7 @@ def step3_python_deps(cfg: Config, log: Logger) -> bool:
                  f"{', '.join(manifest.RUNTIME_DEPENDENCIES)}")
         return True
 
-    real_py = _real_python()
+    real_py = _real_python((cfg.user_qgis_root,))
     if real_py is None:
         log.err("No encontré un intérprete de Python real para crear el venv. "
                 "Instala QGIS (paso 2) o Python, y reintenta el paso 3.")
@@ -762,6 +867,7 @@ def build_config(args: argparse.Namespace) -> Config:
         non_interactive=args.non_interactive,
         skip_signature=args.skip_signature,
         plugin_url=args.plugin_url or os.environ.get("QGIS_MCP_PLUGIN_URL", ""),
+        qgis_install=args.qgis_install,
         assume_installed={s.strip().lower() for s in args.assume_installed.split(",")
                           if s.strip()},
     )
@@ -779,6 +885,12 @@ def main() -> int:
     parser.add_argument("--assume-installed", default="",
                         help="Asume ya instalado y omite su instalación. "
                              "Lista: claude,qgis (útil en modo desatendido).")
+    parser.add_argument("--qgis-install", default="auto",
+                        choices=("auto", "msi", "user"),
+                        help="Cómo instalar QGIS si falta: 'msi' (estándar, "
+                             "requiere administrador), 'user' (en tu carpeta, "
+                             "SIN administrador), 'auto' (detecta permisos; "
+                             "por defecto).")
     parser.add_argument("--non-interactive", action="store_true",
                         help="Sin preguntas (requiere --base-dir).")
     parser.add_argument("--dry-run", action="store_true",
@@ -797,6 +909,9 @@ def main() -> int:
     log.info(f"Descargas    : {cfg.downloads_dir}")
     log.info(f"venv Python  : {cfg.venv_dir}")
     log.info(f"Perfil QGIS  : {cfg.qgis_profile}")
+    log.info(f"Install QGIS : {cfg.qgis_install}"
+             + (" (sin admin → carpeta de usuario)"
+                if cfg.qgis_install == "user" else ""))
     log.info(f"Pasos        : {sorted(cfg.steps)}")
     log.info(f"Modo         : {'DRY-RUN (no toca nada)' if cfg.dry_run else 'real'}")
     if cfg.skip_signature:

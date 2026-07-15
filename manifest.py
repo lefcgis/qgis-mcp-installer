@@ -83,8 +83,34 @@ QGIS_LTR = Download(
     expected_publisher_contains="QGIS",  # firmado por "QGIS.ORG Association"
     sha256=None,  # fija el valor del .sha256sum oficial para una auditoría
     expected_size=None,
-    notes="MSI todo-en-uno: incluye Python 3.12, GDAL, Qt. msiexec /i /qb.",
+    notes="MSI todo-en-uno: incluye Python 3.12, GDAL, Qt. msiexec /i /qb. "
+          "REQUIERE permisos de administrador (instala a nivel máquina).",
 )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Paso 2 (alternativa SIN administrador) — Instalador de red OSGeo4W
+# Es el instalador oficial de OSGeo: con --root apuntando a una carpeta del
+# usuario instala QGIS LTR completo sin pedir elevación (UAC). Verificado
+# 2026-07-15: 1.0 MB, firma Authenticode válida de
+# "THE OPEN SOURCE GEOSPATIAL FOUNDATION".
+# ─────────────────────────────────────────────────────────────────────────────
+
+OSGEO4W_SETUP = Download(
+    key="osgeo4w_setup",
+    name="Instalador de red OSGeo4W (QGIS sin admin)",
+    url="https://download.osgeo.org/osgeo4w/v2/osgeo4w-setup.exe",
+    filename="osgeo4w-setup.exe",
+    expected_publisher_contains="OPEN SOURCE GEOSPATIAL",
+    sha256=None,  # el setup se actualiza; la firma de OSGeo es la garantía
+    expected_size=1_032_336,  # ~1.0 MB observado el 2026-07-15 (chequeo de cordura)
+    notes="Con --root en carpeta del usuario NO requiere administrador.",
+)
+
+# Repositorio oficial de paquetes OSGeo4W (v2) y meta-paquete a instalar.
+# qgis-ltr-full = QGIS LTR completo (equivalente al contenido del MSI:
+# Python, GDAL, GRASS, SAGA, processing). Descarga ~1.5 GB la primera vez.
+OSGEO4W_SITE = "https://download.osgeo.org/osgeo4w/v2"
+OSGEO4W_PACKAGES = "qgis-ltr-full"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Paso 4 — Plugin QGIS MCP (versión mejorada, fork del usuario)
@@ -136,5 +162,5 @@ RUNTIME_DEPENDENCIES: list[str] = [
 
 DOWNLOADS: dict[str, Download] = {
     d.key: d
-    for d in (CLAUDE_DESKTOP, QGIS_LTR, PLUGIN_FORK, PLUGIN_UPSTREAM)
+    for d in (CLAUDE_DESKTOP, QGIS_LTR, OSGEO4W_SETUP, PLUGIN_FORK, PLUGIN_UPSTREAM)
 }
