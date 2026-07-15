@@ -64,6 +64,18 @@ completo funciona de ponta a ponta sem elevação**:
 python etl_installer.py --qgis-install user
 ```
 
+## Fala o seu idioma: português e espanhol 🇧🇷🇪🇸
+
+O instalador é **bilíngue**: ele detecta o idioma do seu Windows e mostra todo o
+assistente (perguntas, progresso, resumo final) em **português do Brasil** ou em
+**espanhol**. Você também pode forçar:
+
+```bash
+python etl_installer.py --lang pt   # assistente em português
+python etl_installer.py --lang es   # asistente en español
+# padrão: --lang auto (detecta o idioma do Windows)
+```
+
 ## Detecção: não reinstala o que você já tem
 
 Antes de instalar o Claude (passo 1) e o QGIS (passo 2), o ETL **detecta** se eles

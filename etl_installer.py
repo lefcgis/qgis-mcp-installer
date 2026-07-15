@@ -72,6 +72,307 @@ if os.environ.get("NO_COLOR") or not sys.stdout.isatty():
     _C = {k: "" for k in _C}
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Idioma (i18n): español (es) y portugués de Brasil (pt)
+# El idioma se detecta del Windows del usuario (o de LANG/LC_ALL) y puede
+# forzarse con --lang es|pt. TODO mensaje visible al usuario sale de T().
+# ─────────────────────────────────────────────────────────────────────────────
+
+LANG = "es"  # se fija en main() vía _detect_lang(); "es" por defecto
+
+
+def _detect_lang(argv: list[str]) -> str:
+    """Resuelve el idioma: --lang explícito > idioma de Windows > env > es."""
+    for i, a in enumerate(argv):
+        v = None
+        if a == "--lang" and i + 1 < len(argv):
+            v = argv[i + 1].lower()
+        elif a.startswith("--lang="):
+            v = a.split("=", 1)[1].lower()
+        if v in ("es", "pt"):
+            return v
+        if v == "auto":
+            break
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            langid = ctypes.windll.kernel32.GetUserDefaultUILanguage()
+            if langid & 0x3FF == 0x16:  # id primario 0x16 = portugués
+                return "pt"
+        except Exception:
+            pass
+    for var in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
+        if os.environ.get(var, "").lower().startswith("pt"):
+            return "pt"
+    return "es"
+
+
+# Catálogo de mensajes. Clave -> {es, pt}. Los placeholders usan str.format.
+MSG: dict[str, dict[str, str]] = {
+    # Logger / genéricos
+    "ui.step_prefix": {"es": "[Paso {n}] {title}", "pt": "[Passo {n}] {title}"},
+    "log.session": {"es": "Sesión iniciada {ts}", "pt": "Sessão iniciada {ts}"},
+    # download / verificación
+    "dl.dry": {"es": "[dry-run] descargaría {url} -> {dest}",
+               "pt": "[dry-run] baixaria {url} -> {dest}"},
+    "dl.cached": {"es": "Ya descargado: {name} ({size})",
+                  "pt": "Já baixado: {name} ({size})"},
+    "dl.downloading": {"es": "Descargando {name}", "pt": "Baixando {name}"},
+    "dl.from": {"es": "  desde: {url}", "pt": "  de: {url}"},
+    "dl.done": {"es": "Descargado {name} ({size})", "pt": "Baixado {name} ({size})"},
+    "sha.ok": {"es": "SHA-256 verificado: {h}…", "pt": "SHA-256 verificado: {h}…"},
+    "sha.bad": {"es": "SHA-256 NO coincide. esperado={e}… actual={a}…",
+                "pt": "SHA-256 NÃO confere. esperado={e}… atual={a}…"},
+    "sig.skipped": {"es": "Verificación de firma OMITIDA por el usuario (--skip-signature).",
+                    "pt": "Verificação de assinatura IGNORADA pelo usuário (--skip-signature)."},
+    "sig.notwin": {"es": "No es Windows: se omite la verificación Authenticode.",
+                   "pt": "Não é Windows: a verificação Authenticode será ignorada."},
+    "sig.execfail": {"es": "No se pudo ejecutar la verificación de firma: {exc}",
+                     "pt": "Não foi possível executar a verificação de assinatura: {exc}"},
+    "sig.invalid": {"es": "Firma inválida o ausente (Status={status}).",
+                    "pt": "Assinatura inválida ou ausente (Status={status})."},
+    "sig.publisher": {"es": "Publisher inesperado. esperado ~'{exp}', firma='{subj}'",
+                      "pt": "Publisher inesperado. esperado ~'{exp}', assinatura='{subj}'"},
+    "sig.ok": {"es": "Firma válida. Publisher: {subj}",
+               "pt": "Assinatura válida. Publisher: {subj}"},
+    "fetch.size": {"es": "Tamaño inesperado ({size}); continúo, pero revísalo.",
+                   "pt": "Tamanho inesperado ({size}); continuo, mas verifique."},
+    # detección / confirmación
+    "det.found": {"es": "Detectado {name}{detail}{loc}",
+                  "pt": "Detectado: {name}{detail}{loc}"},
+    "det.ver_unknown": {"es": " (versión no detectada)", "pt": " (versão não detectada)"},
+    "det.notfound": {"es": "No detecté {name} automáticamente en las rutas habituales.",
+                     "pt": "Não detectei {name} automaticamente nos caminhos habituais."},
+    "det.assume": {"es": "--assume-installed: se asume {name} ya presente.",
+                   "pt": "--assume-installed: assume-se que {name} já está presente."},
+    "det.ask_have": {"es": "  ¿Ya tienes {name} instalado? [{d}]: ",
+                     "pt": "  Você já tem o {name} instalado? [{d}]: "},
+    "det.ask_ver": {"es": "  ¿Qué versión de {name} tienes? [{d}]: ",
+                    "pt": "  Qual versão do {name} você tem? [{d}]: "},
+    "det.dontknow": {"es": "no sé", "pt": "não sei"},
+    # uv
+    "uv.installing": {"es": "Instalando 'uv' (gestor de entorno del servidor MCP)…",
+                      "pt": "Instalando o 'uv' (gerenciador de ambiente do servidor MCP)…"},
+    "uv.fail": {"es": "No pude asegurar 'uv'. El servidor podría no arrancar hasta "
+                      "instalarlo (https://docs.astral.sh/uv/).",
+                "pt": "Não consegui garantir o 'uv'. O servidor pode não iniciar até "
+                      "que ele seja instalado (https://docs.astral.sh/uv/)."},
+    # estados (aparecen en el RESUMEN)
+    "st.present": {"es": "ya presente{v}", "pt": "já presente{v}"},
+    "st.installed": {"es": "instalado", "pt": "instalado"},
+    "st.installed_msi": {"es": "instalado (MSI)", "pt": "instalado (MSI)"},
+    "st.installed_user": {"es": "instalado sin admin en {root}",
+                          "pt": "instalado sem admin em {root}"},
+    "st.venv": {"es": "venv + deps", "pt": "venv + deps"},
+    # paso 1
+    "s1.title": {"es": "Claude Desktop", "pt": "Claude Desktop"},
+    "s1.existing_ok": {"es": "Usas tu Claude Desktop existente{v}. Se omite la "
+                             "instalación; igual se configurará en el paso 6.",
+                       "pt": "Usando o seu Claude Desktop existente{v}. A instalação "
+                             "será pulada; mesmo assim ele será configurado no passo 6."},
+    "s1.dry": {"es": "[dry-run] ejecutaría el instalador de Claude Desktop (/S).",
+               "pt": "[dry-run] executaria o instalador do Claude Desktop (/S)."},
+    "s1.running": {"es": "Ejecutando instalador (silencioso)…",
+                   "pt": "Executando o instalador (silencioso)…"},
+    "s1.ok": {"es": "Claude Desktop instalado.", "pt": "Claude Desktop instalado."},
+    "s1.err": {"es": "El instalador de Claude devolvió código {rc}.",
+               "pt": "O instalador do Claude retornou o código {rc}."},
+    # paso 2
+    "s2.title": {"es": "QGIS {v} LTR", "pt": "QGIS {v} LTR"},
+    "s2.old": {"es": "Tu QGIS ({v}) es anterior a 3.28; el plugin exige >= 3.28. "
+                     "Puede que no cargue. Considera actualizar.",
+               "pt": "Seu QGIS ({v}) é anterior ao 3.28; o plugin exige >= 3.28. "
+                     "Ele pode não carregar. Considere atualizar."},
+    "s2.existing_ok": {"es": "Usas tu QGIS existente{v}. Se omite la instalación; "
+                             "el plugin se desplegará en tu perfil.",
+                       "pt": "Usando o seu QGIS existente{v}. A instalação será "
+                             "pulada; o plugin será implantado no seu perfil."},
+    "s2.mode_msi": {"es": "Tienes permisos de administrador → instalación estándar (MSI).",
+                    "pt": "Você tem permissões de administrador → instalação padrão (MSI)."},
+    "s2.mode_user": {"es": "Sin permisos de administrador → QGIS se instalará en tu "
+                           "carpeta de usuario (OSGeo4W, no requiere elevación).",
+                     "pt": "Sem permissões de administrador → o QGIS será instalado na "
+                           "sua pasta de usuário (OSGeo4W, não requer elevação)."},
+    "msi.dry": {"es": "[dry-run] ejecutaría msiexec para instalar QGIS.",
+                "pt": "[dry-run] executaria o msiexec para instalar o QGIS."},
+    "msi.installing": {"es": "Instalando QGIS con msiexec (barra de progreso básica)…",
+                       "pt": "Instalando o QGIS com msiexec (barra de progresso básica)…"},
+    "msi.ok": {"es": "QGIS instalado.", "pt": "QGIS instalado."},
+    "msi.err": {"es": "msiexec devolvió código {rc}.",
+                "pt": "msiexec retornou o código {rc}."},
+    "msi.perm_hint": {"es": "Ese código suele indicar falta de permisos de administrador. "
+                            "Reintenta con --qgis-install user para instalar QGIS en tu "
+                            "carpeta de usuario SIN administrador.",
+                      "pt": "Esse código costuma indicar falta de permissões de administrador. "
+                            "Tente novamente com --qgis-install user para instalar o QGIS na "
+                            "sua pasta de usuário SEM administrador."},
+    "o4w.dry": {"es": "[dry-run] instalaría QGIS sin admin en {root} con:",
+                "pt": "[dry-run] instalaria o QGIS sem admin em {root} com:"},
+    "o4w.installing": {"es": "Instalando QGIS LTR en {root} (sin administrador)…",
+                       "pt": "Instalando o QGIS LTR em {root} (sem administrador)…"},
+    "o4w.big": {"es": "Primera vez: descarga ~1.5 GB del repositorio oficial de OSGeo. "
+                      "Puede tardar varios minutos según tu conexión.",
+                "pt": "Primeira vez: baixa ~1,5 GB do repositório oficial da OSGeo. "
+                      "Pode levar vários minutos dependendo da sua conexão."},
+    "o4w.ok": {"es": "QGIS LTR instalado en {root} (binario: {bin}).",
+               "pt": "QGIS LTR instalado em {root} (binário: {bin})."},
+    "o4w.open": {"es": "Ábrelo desde el menú Inicio ('QGIS LTR (usuario)') o con {bat}",
+                 "pt": "Abra-o pelo menu Iniciar ('QGIS LTR (usuario)') ou com {bat}"},
+    "o4w.err": {"es": "OSGeo4W setup devolvió código {rc}{nobin}. Revisa el log de "
+                      "OSGeo4W en {log}",
+                "pt": "O setup do OSGeo4W retornou o código {rc}{nobin}. Verifique o "
+                      "log do OSGeo4W em {log}"},
+    "o4w.nobin": {"es": " y no se encontró el binario de QGIS",
+                  "pt": " e o binário do QGIS não foi encontrado"},
+    # paso 3
+    "s3.title": {"es": "Dependencias de Python (venv aislado)",
+                 "pt": "Dependências de Python (venv isolado)"},
+    "s3.pyver": {"es": "Este proceso corre en Python {cur}; el servidor necesita >= {min}.",
+                 "pt": "Este processo roda em Python {cur}; o servidor precisa de >= {min}."},
+    "s3.dry": {"es": "[dry-run] crearía venv en {venv} e instalaría: {deps}",
+               "pt": "[dry-run] criaria o venv em {venv} e instalaria: {deps}"},
+    "s3.nopy": {"es": "No encontré un intérprete de Python real para crear el venv. "
+                      "Instala QGIS (paso 2) o Python, y reintenta el paso 3.",
+                "pt": "Não encontrei um interpretador Python real para criar o venv. "
+                      "Instale o QGIS (passo 2) ou o Python e repita o passo 3."},
+    "s3.using": {"es": "Usando Python: {py}", "pt": "Usando Python: {py}"},
+    "s3.creating": {"es": "Creando venv en {venv}", "pt": "Criando o venv em {venv}"},
+    "s3.venverr": {"es": "No se pudo crear el venv.",
+                   "pt": "Não foi possível criar o venv."},
+    "s3.pip": {"es": "Actualizando pip e instalando dependencias fijadas…",
+               "pt": "Atualizando o pip e instalando as dependências fixadas…"},
+    "s3.depserr": {"es": "Falló la instalación de dependencias.",
+                   "pt": "A instalação das dependências falhou."},
+    "s3.ok": {"es": "Dependencias instaladas en el venv.",
+              "pt": "Dependências instaladas no venv."},
+    # paso 4
+    "s4.title": {"es": "Plugin QGIS MCP (fork mejorado)",
+                 "pt": "Plugin QGIS MCP (fork aprimorado)"},
+    "s4.url": {"es": "Usando URL de plugin indicada: {url}",
+               "pt": "Usando a URL de plugin indicada: {url}"},
+    "s4.forkfail": {"es": "No se pudo obtener el fork ({exc}).",
+                    "pt": "Não foi possível obter o fork ({exc})."},
+    "s4.fallback": {"es": "Recurriendo al upstream original (nkarasiak, MIT).",
+                    "pt": "Recorrendo ao upstream original (nkarasiak, MIT)."},
+    "s4.dry": {"es": "[dry-run] extraería el ZIP y copiaría qgis_mcp_plugin/ + src/.",
+               "pt": "[dry-run] extrairia o ZIP e copiaria qgis_mcp_plugin/ + src/."},
+    "s4.zipempty": {"es": "El ZIP del plugin está vacío.",
+                    "pt": "O ZIP do plugin está vazio."},
+    "s4.nometa": {"es": "El repositorio no contiene qgis_mcp_plugin/metadata.txt.",
+                  "pt": "O repositório não contém qgis_mcp_plugin/metadata.txt."},
+    "s4.servercopied": {"es": "Código del servidor MCP copiado a {dir}",
+                        "pt": "Código do servidor MCP copiado para {dir}"},
+    "s4.nosrc": {"es": "El repo no trae src/; se usará el modo remoto (uvx) en el paso 6.",
+                 "pt": "O repositório não traz src/; será usado o modo remoto (uvx) no passo 6."},
+    "s4.ok": {"es": "Plugin obtenido y preparado.", "pt": "Plugin obtido e preparado."},
+    # paso 5
+    "s5.title": {"es": "Configurar QGIS (desplegar y habilitar el plugin)",
+                 "pt": "Configurar o QGIS (implantar e habilitar o plugin)"},
+    "s5.dry_copy": {"es": "[dry-run] copiaría el plugin extraído -> {dest}",
+                    "pt": "[dry-run] copiaria o plugin extraído -> {dest}"},
+    "s5.dry_copy2": {"es": "[dry-run] copiaría {src} -> {dest}",
+                     "pt": "[dry-run] copiaria {src} -> {dest}"},
+    "s5.dry_enable": {"es": "[dry-run] habilitaría 'qgis_mcp_plugin' en QGIS3.ini",
+                      "pt": "[dry-run] habilitaria 'qgis_mcp_plugin' no QGIS3.ini"},
+    "s5.notfound": {"es": "No encuentro el plugin extraído. Ejecuta antes el paso 4.",
+                    "pt": "Não encontro o plugin extraído. Execute antes o passo 4."},
+    "s5.copied": {"es": "Plugin copiado a {dest}", "pt": "Plugin copiado para {dest}"},
+    "s5.iniwarn": {"es": "No pude editar QGIS3.ini automáticamente ({exc}). "
+                         "Habilita 'QGIS MCP' a mano en Complementos.",
+                   "pt": "Não consegui editar o QGIS3.ini automaticamente ({exc}). "
+                         "Habilite o 'QGIS MCP' manualmente em Complementos."},
+    "s5.ok": {"es": "QGIS configurado. Recuerda: Complementos → QGIS MCP → Start Server.",
+              "pt": "QGIS configurado. Lembre-se: Complementos → QGIS MCP → Start Server."},
+    "ini.missing": {"es": "{ini} no existe todavía (abre QGIS una vez). Se omite.",
+                    "pt": "{ini} ainda não existe (abra o QGIS uma vez). Etapa ignorada."},
+    "ini.enabled": {"es": "Plugin habilitado en {ini}", "pt": "Plugin habilitado no {ini}"},
+    # paso 6
+    "s6.title": {"es": "Configurar Claude Desktop (claude_desktop_config.json)",
+                 "pt": "Configurar o Claude Desktop (claude_desktop_config.json)"},
+    "s6.mode": {"es": "Modo de servidor: {mode}", "pt": "Modo do servidor: {mode}"},
+    "s6.dry": {"es": "[dry-run] escribiría en {path}:",
+               "pt": "[dry-run] escreveria em {path}:"},
+    "s6.backup": {"es": "Respaldo creado: {name}", "pt": "Backup criado: {name}"},
+    "s6.badjson": {"es": "El config existente no era JSON válido; se reemplaza.",
+                   "pt": "O config existente não era um JSON válido; será substituído."},
+    "s6.written": {"es": "Config de Claude escrita en {path}",
+                   "pt": "Config do Claude escrita em {path}"},
+    # interfaz general
+    "ui.choose": {"es": "El usuario elige DÓNDE se instala todo. Enter = valor por defecto.\n",
+                  "pt": "Você escolhe ONDE tudo será instalado. Enter = valor padrão.\n"},
+    "ui.rootdir": {"es": "Carpeta raíz para QGIS MCP:", "pt": "Pasta raiz para o QGIS MCP:"},
+    "ui.root": {"es": "Carpeta raíz : {v}", "pt": "Pasta raiz    : {v}"},
+    "ui.downloads": {"es": "Descargas    : {v}", "pt": "Downloads     : {v}"},
+    "ui.venv": {"es": "venv Python  : {v}", "pt": "venv Python   : {v}"},
+    "ui.profile": {"es": "Perfil QGIS  : {v}", "pt": "Perfil QGIS   : {v}"},
+    "ui.qgismode": {"es": "Install QGIS : {v}{extra}", "pt": "Instalar QGIS : {v}{extra}"},
+    "ui.qgismode_user": {"es": " (sin admin → carpeta de usuario)",
+                         "pt": " (sem admin → pasta do usuário)"},
+    "ui.steps": {"es": "Pasos        : {v}", "pt": "Passos        : {v}"},
+    "ui.lang": {"es": "Idioma       : español", "pt": "Idioma        : português (BR)"},
+    "ui.mode": {"es": "Modo         : {v}", "pt": "Modo          : {v}"},
+    "ui.mode_dry": {"es": "DRY-RUN (no toca nada)", "pt": "DRY-RUN (não toca em nada)"},
+    "ui.mode_real": {"es": "real", "pt": "real"},
+    "ui.sigoff": {"es": "Verificación de firma DESACTIVADA.",
+                  "pt": "Verificação de assinatura DESATIVADA."},
+    "ui.continue": {"es": "\n¿Continuar? [s/N]: ", "pt": "\nContinuar? [s/N]: "},
+    "ui.cancelled": {"es": "Cancelado por el usuario.", "pt": "Cancelado pelo usuário."},
+    "ui.interrupted": {"es": "Interrumpido por el usuario.",
+                       "pt": "Interrompido pelo usuário."},
+    "ui.exception": {"es": "Paso {n} lanzó una excepción: {exc}",
+                     "pt": "O passo {n} lançou uma exceção: {exc}"},
+    "ui.stepfail": {"es": "El paso {n} falló. Detengo la cadena ETL.",
+                    "pt": "O passo {n} falhou. Interrompendo a cadeia ETL."},
+    "ui.summary": {"es": "RESUMEN", "pt": "RESUMO"},
+    "ui.sumline": {"es": "  [{mark}] Paso {n}: {label}{extra}",
+                   "pt": "  [{mark}] Passo {n}: {label}{extra}"},
+    "lbl.1": {"es": "Claude Desktop", "pt": "Claude Desktop"},
+    "lbl.2": {"es": "QGIS", "pt": "QGIS"},
+    "lbl.3": {"es": "Dependencias Python", "pt": "Dependências Python"},
+    "lbl.4": {"es": "Plugin QGIS MCP", "pt": "Plugin QGIS MCP"},
+    "lbl.5": {"es": "Configurar QGIS", "pt": "Configurar o QGIS"},
+    "lbl.6": {"es": "Configurar Claude", "pt": "Configurar o Claude"},
+    "ui.done": {"es": "Instalación completa. Abre QGIS → Complementos → QGIS MCP → "
+                      "Start Server, luego abre Claude Desktop.",
+                "pt": "Instalação completa. Abra o QGIS → Complementos → QGIS MCP → "
+                      "Start Server e depois abra o Claude Desktop."},
+    "ui.checklog": {"es": "Revisa el log: {path}", "pt": "Verifique o log: {path}"},
+    # ayuda de la línea de comandos
+    "h.desc": {"es": "Instalador ETL de QGIS MCP (transparente y auditable).",
+               "pt": "Instalador ETL do QGIS MCP (transparente e auditável)."},
+    "h.basedir": {"es": "Carpeta raíz de instalación.", "pt": "Pasta raiz da instalação."},
+    "h.profile": {"es": "Perfil de QGIS.", "pt": "Perfil do QGIS."},
+    "h.steps": {"es": "Pasos a ejecutar, ej. '4,5,6'. Vacío = todos.",
+                "pt": "Passos a executar, ex.: '4,5,6'. Vazio = todos."},
+    "h.pluginurl": {"es": "URL del ZIP del plugin (sobreescribe el fork).",
+                    "pt": "URL do ZIP do plugin (substitui o fork)."},
+    "h.assume": {"es": "Asume ya instalado y omite su instalación. "
+                       "Lista: claude,qgis (útil en modo desatendido).",
+                 "pt": "Assume que já está instalado e pula a instalação. "
+                       "Lista: claude,qgis (útil no modo não interativo)."},
+    "h.qgisinstall": {"es": "Cómo instalar QGIS si falta: 'msi' (estándar, requiere "
+                            "administrador), 'user' (en tu carpeta, SIN administrador), "
+                            "'auto' (detecta permisos; por defecto).",
+                      "pt": "Como instalar o QGIS se estiver faltando: 'msi' (padrão, "
+                            "requer administrador), 'user' (na sua pasta, SEM "
+                            "administrador), 'auto' (detecta permissões; padrão)."},
+    "h.noninteractive": {"es": "Sin preguntas (requiere --base-dir).",
+                         "pt": "Sem perguntas (requer --base-dir)."},
+    "h.dryrun": {"es": "Muestra el plan sin descargar ni instalar nada.",
+                 "pt": "Mostra o plano sem baixar nem instalar nada."},
+    "h.skipsig": {"es": "Omite la verificación de firma (NO recomendado).",
+                  "pt": "Ignora a verificação de assinatura (NÃO recomendado)."},
+    "h.lang": {"es": "Idioma de los mensajes: es, pt o auto (detecta el de Windows).",
+               "pt": "Idioma das mensagens: es, pt ou auto (detecta o do Windows)."},
+}
+
+
+def T(key: str, **kw) -> str:
+    """Devuelve el mensaje `key` en el idioma activo, formateado con `kw`."""
+    entry = MSG[key]
+    return (entry.get(LANG) or entry["es"]).format(**kw)
+
+
 class Logger:
     """Escribe a consola y, a la vez, a un archivo de log auditable.
 
@@ -84,7 +385,8 @@ class Logger:
         if to_file:
             log_path.parent.mkdir(parents=True, exist_ok=True)
             self._fh = log_path.open("a", encoding="utf-8")
-        self.line(f"\n===== Sesión iniciada {_dt.datetime.now().isoformat()} =====")
+        self.line("\n===== " + T("log.session", ts=_dt.datetime.now().isoformat())
+                  + " =====")
 
     def _write(self, msg: str) -> None:
         print(msg)
@@ -99,7 +401,8 @@ class Logger:
             self._fh.flush()
 
     def step(self, n: int, title: str) -> None:
-        self._write(f"\n{_C['bold']}{_C['cyan']}[Paso {n}] {title}{_C['reset']}")
+        self._write(f"\n{_C['bold']}{_C['cyan']}"
+                    + T("ui.step_prefix", n=n, title=title) + _C["reset"])
 
     def info(self, msg: str) -> None:
         self._write(f"  {msg}")
@@ -187,15 +490,15 @@ def download(dl: "manifest.Download", dest_dir: Path, log: Logger,
     """Descarga con barra de progreso. Devuelve la ruta al archivo."""
     dest = dest_dir / dl.filename
     if dry_run:
-        log.info(f"[dry-run] descargaría {dl.url} -> {dest}")
+        log.info(T("dl.dry", url=dl.url, dest=dest))
         return dest
     if dest.exists() and dest.stat().st_size > 0:
-        log.ok(f"Ya descargado: {dest.name} ({_human(dest.stat().st_size)})")
+        log.ok(T("dl.cached", name=dest.name, size=_human(dest.stat().st_size)))
         return dest
 
     dest_dir.mkdir(parents=True, exist_ok=True)
-    log.info(f"Descargando {dl.name}")
-    log.info(f"  desde: {dl.url}")
+    log.info(T("dl.downloading", name=dl.name))
+    log.info(T("dl.from", url=dl.url))
     tmp = dest.with_suffix(dest.suffix + ".part")
     req = urllib.request.Request(dl.url, headers={"User-Agent": "qgis-mcp-etl/1.0"})
     with urllib.request.urlopen(req, timeout=60) as resp, tmp.open("wb") as fh:
@@ -215,7 +518,7 @@ def download(dl: "manifest.Download", dest_dir: Path, log: Logger,
     if sys.stdout.isatty():
         sys.stdout.write("\n")
     tmp.replace(dest)
-    log.ok(f"Descargado {dest.name} ({_human(dest.stat().st_size)})")
+    log.ok(T("dl.done", name=dest.name, size=_human(dest.stat().st_size)))
     return dest
 
 
@@ -229,9 +532,9 @@ def verify_sha256(path: Path, expected: str | None, log: Logger) -> bool:
             h.update(block)
     actual = h.hexdigest()
     if actual.lower() == expected.lower():
-        log.ok(f"SHA-256 verificado: {actual[:16]}…")
+        log.ok(T("sha.ok", h=actual[:16]))
         return True
-    log.err(f"SHA-256 NO coincide. esperado={expected[:16]}… actual={actual[:16]}…")
+    log.err(T("sha.bad", e=expected[:16], a=actual[:16]))
     return False
 
 
@@ -241,10 +544,10 @@ def verify_signature(path: Path, publisher_contains: str | None,
     if publisher_contains is None:
         return True
     if skip:
-        log.warn("Verificación de firma OMITIDA por el usuario (--skip-signature).")
+        log.warn(T("sig.skipped"))
         return True
     if sys.platform != "win32":
-        log.warn("No es Windows: se omite la verificación Authenticode.")
+        log.warn(T("sig.notwin"))
         return True
     ps = (
         f"$s = Get-AuthenticodeSignature -LiteralPath '{path}'; "
@@ -257,19 +560,18 @@ def verify_signature(path: Path, publisher_contains: str | None,
             capture_output=True, text=True, timeout=60,
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        log.err(f"No se pudo ejecutar la verificación de firma: {exc}")
+        log.err(T("sig.execfail", exc=exc))
         return False
     lines = [ln.strip() for ln in out.stdout.splitlines() if ln.strip()]
     status = lines[0] if lines else "Unknown"
     subject = lines[1] if len(lines) > 1 else ""
     if status != "Valid":
-        log.err(f"Firma inválida o ausente (Status={status}).")
+        log.err(T("sig.invalid", status=status))
         return False
     if publisher_contains.lower() not in subject.lower():
-        log.err(f"Publisher inesperado. esperado ~'{publisher_contains}', "
-                f"firma='{subject}'")
+        log.err(T("sig.publisher", exp=publisher_contains, subj=subject))
         return False
-    log.ok(f"Firma válida. Publisher: {subject}")
+    log.ok(T("sig.ok", subj=subject))
     return True
 
 
@@ -284,8 +586,7 @@ def fetch_verified(dl: "manifest.Download", cfg: Config, log: Logger) -> Path | 
     if not verify_sha256(path, dl.sha256, log):
         return None
     if dl.expected_size and abs(path.stat().st_size - dl.expected_size) > dl.expected_size * 0.25:
-        log.warn(f"Tamaño inesperado ({_human(path.stat().st_size)}); "
-                 "continúo, pero revísalo.")
+        log.warn(T("fetch.size", size=_human(path.stat().st_size)))
     return path
 
 
@@ -383,28 +684,28 @@ def confirm_installed(name: str, key: str,
     """
     found, ver, loc = detected
     if found:
-        detail = f" v{ver}" if ver else " (versión no detectada)"
-        log.info(f"Detectado {name}{detail}" + (f"  ·  {loc}" if loc else ""))
+        detail = f" v{ver}" if ver else T("det.ver_unknown")
+        log.info(T("det.found", name=name, detail=detail,
+                   loc=(f"  ·  {loc}" if loc else "")))
     else:
-        log.info(f"No detecté {name} automáticamente en las rutas habituales.")
+        log.info(T("det.notfound", name=name))
 
     # El usuario puede forzar 'ya instalado' por CLI (--assume-installed).
     if key in cfg.assume_installed:
-        log.info(f"--assume-installed: se asume {name} ya presente.")
+        log.info(T("det.assume", name=name))
         return True, ver
 
     if cfg.non_interactive:
         return found, ver
 
     prompt_default = "S/n" if found else "s/N"
-    ans = input(f"  ¿Ya tienes {name} instalado? [{prompt_default}]: ").strip().lower()
+    ans = input(T("det.ask_have", name=name, d=prompt_default)).strip().lower()
     if not ans:
         ans = "s" if found else "n"
-    has = ans in ("s", "y", "si", "sí", "yes")
+    has = ans in ("s", "y", "si", "sí", "sim", "yes")
     if not has:
         return False, None
-    typed = input(f"  ¿Qué versión de {name} tienes? "
-                  f"[{ver or 'no sé'}]: ").strip()
+    typed = input(T("det.ask_ver", name=name, d=ver or T("det.dontknow"))).strip()
     return True, (typed or ver)
 
 
@@ -454,7 +755,7 @@ def _ensure_uv(real_py: str | None, log: Logger, dry_run: bool) -> str | None:
     if dry_run:
         return "uv"
     if real_py:
-        log.info("Instalando 'uv' (gestor de entorno del servidor MCP)…")
+        log.info(T("uv.installing"))
         subprocess.run([real_py, "-m", "pip", "install", "--upgrade", "uv"])
         scripts = "Scripts" if sys.platform == "win32" else "bin"
         cand = Path(real_py).parent / scripts / ("uv.exe" if sys.platform == "win32" else "uv")
@@ -463,8 +764,7 @@ def _ensure_uv(real_py: str | None, log: Logger, dry_run: bool) -> str | None:
         exe = shutil.which("uv")
         if exe:
             return exe
-    log.warn("No pude asegurar 'uv'. El servidor podría no arrancar hasta "
-             "instalarlo (https://docs.astral.sh/uv/).")
+    log.warn(T("uv.fail"))
     return None
 
 
@@ -473,40 +773,37 @@ def _ensure_uv(real_py: str | None, log: Logger, dry_run: bool) -> str | None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def step1_claude_desktop(cfg: Config, log: Logger) -> bool:
-    log.step(1, "Claude Desktop")
+    log.step(1, T("s1.title"))
     has, ver = confirm_installed("Claude Desktop", "claude", detect_claude(), cfg, log)
     if has:
-        cfg.status[1] = f"ya presente{f' (v{ver})' if ver else ''}"
-        log.ok(f"Usas tu Claude Desktop existente{f' (v{ver})' if ver else ''}. "
-               "Se omite la instalación; igual se configurará en el paso 6.")
+        cfg.status[1] = T("st.present", v=f" (v{ver})" if ver else "")
+        log.ok(T("s1.existing_ok", v=f" (v{ver})" if ver else ""))
         return True
     installer = fetch_verified(manifest.CLAUDE_DESKTOP, cfg, log)
     if installer is None:
         return False
     if cfg.dry_run:
-        log.info("[dry-run] ejecutaría el instalador de Claude Desktop (/S).")
+        log.info(T("s1.dry"))
         return True
-    log.info("Ejecutando instalador (silencioso)…")
+    log.info(T("s1.running"))
     rc = subprocess.run([str(installer), "/S"]).returncode
     if rc == 0:
-        cfg.status[1] = "instalado"
-        log.ok("Claude Desktop instalado.")
+        cfg.status[1] = T("st.installed")
+        log.ok(T("s1.ok"))
         return True
-    log.err(f"El instalador de Claude devolvió código {rc}.")
+    log.err(T("s1.err", rc=rc))
     return False
 
 
 def step2_qgis(cfg: Config, log: Logger) -> bool:
-    log.step(2, f"QGIS {manifest.QGIS_VERSION} LTR")
+    log.step(2, T("s2.title", v=manifest.QGIS_VERSION))
     has, ver = confirm_installed(
         "QGIS", "qgis", detect_qgis((cfg.user_qgis_root,)), cfg, log)
     if has:
-        cfg.status[2] = f"ya presente{f' (v{ver})' if ver else ''}"
+        cfg.status[2] = T("st.present", v=f" (v{ver})" if ver else "")
         if _version_tuple(ver) and _version_tuple(ver) < (3, 28):
-            log.warn(f"Tu QGIS ({ver}) es anterior a 3.28; el plugin exige >= 3.28. "
-                     "Puede que no cargue. Considera actualizar.")
-        log.ok(f"Usas tu QGIS existente{f' (v{ver})' if ver else ''}. "
-               "Se omite la instalación; el plugin se desplegará en tu perfil.")
+            log.warn(T("s2.old", v=ver))
+        log.ok(T("s2.existing_ok", v=f" (v{ver})" if ver else ""))
         return True
 
     # Elegir la vía de instalación. El MSI oficial instala a nivel máquina y
@@ -516,11 +813,10 @@ def step2_qgis(cfg: Config, log: Logger) -> bool:
     if mode == "auto":
         if _is_admin():
             mode = "msi"
-            log.info("Tienes permisos de administrador → instalación estándar (MSI).")
+            log.info(T("s2.mode_msi"))
         else:
             mode = "user"
-            log.info("Sin permisos de administrador → QGIS se instalará en tu "
-                     "carpeta de usuario (OSGeo4W, no requiere elevación).")
+            log.info(T("s2.mode_user"))
     if mode == "msi":
         return _install_qgis_msi(cfg, log)
     return _install_qgis_user(cfg, log)
@@ -532,21 +828,19 @@ def _install_qgis_msi(cfg: Config, log: Logger) -> bool:
     if installer is None:
         return False
     if cfg.dry_run:
-        log.info("[dry-run] ejecutaría msiexec para instalar QGIS.")
+        log.info(T("msi.dry"))
         return True
-    log.info("Instalando QGIS con msiexec (barra de progreso básica)…")
+    log.info(T("msi.installing"))
     rc = subprocess.run(
         ["msiexec", "/i", str(installer), "/qb", "/norestart"]
     ).returncode
     if rc in (0, 3010):  # 3010 = éxito, requiere reinicio
-        cfg.status[2] = "instalado (MSI)"
-        log.ok("QGIS instalado.")
+        cfg.status[2] = T("st.installed_msi")
+        log.ok(T("msi.ok"))
         return True
-    log.err(f"msiexec devolvió código {rc}.")
+    log.err(T("msi.err", rc=rc))
     if rc in (1602, 1603, 1625, 1730):
-        log.warn("Ese código suele indicar falta de permisos de administrador. "
-                 "Reintenta con --qgis-install user para instalar QGIS en tu "
-                 "carpeta de usuario SIN administrador.")
+        log.warn(T("msi.perm_hint"))
     return False
 
 
@@ -574,93 +868,89 @@ def _install_qgis_user(cfg: Config, log: Logger) -> bool:
         "--menu-name", "QGIS LTR (usuario)",
     ]
     if cfg.dry_run:
-        log.info(f"[dry-run] instalaría QGIS sin admin en {root} con:")
+        log.info(T("o4w.dry", root=root))
         log.info("  " + " ".join(cmd))
         return True
-    log.info(f"Instalando QGIS LTR en {root} (sin administrador)…")
-    log.info("Primera vez: descarga ~1.5 GB del repositorio oficial de OSGeo. "
-             "Puede tardar varios minutos según tu conexión.")
+    log.info(T("o4w.installing", root=root))
+    log.info(T("o4w.big"))
     root.mkdir(parents=True, exist_ok=True)
     pkg_cache.mkdir(parents=True, exist_ok=True)
     rc = subprocess.run(cmd).returncode
     qgis_bin = next((root / "bin").glob("qgis*-bin.exe"), None) \
         if (root / "bin").exists() else None
     if rc == 0 and qgis_bin is not None:
-        cfg.status[2] = f"instalado sin admin en {root}"
-        log.ok(f"QGIS LTR instalado en {root} (binario: {qgis_bin.name}).")
-        log.info("Ábrelo desde el menú Inicio ('QGIS LTR (usuario)') o con "
-                 f"{root / 'bin' / 'qgis-ltr.bat'}")
+        cfg.status[2] = T("st.installed_user", root=root)
+        log.ok(T("o4w.ok", root=root, bin=qgis_bin.name))
+        log.info(T("o4w.open", bat=root / "bin" / "qgis-ltr.bat"))
         return True
-    log.err(f"OSGeo4W setup devolvió código {rc}"
-            + ("" if qgis_bin else " y no se encontró el binario de QGIS")
-            + ". Revisa el log de OSGeo4W en "
-            + str(root / "var" / "log" / "setup.log.full"))
+    log.err(T("o4w.err", rc=rc,
+              nobin=("" if qgis_bin else T("o4w.nobin")),
+              log=root / "var" / "log" / "setup.log.full"))
     return False
 
 
 def step3_python_deps(cfg: Config, log: Logger) -> bool:
-    log.step(3, "Dependencias de Python (venv aislado)")
+    log.step(3, T("s3.title"))
     if sys.version_info < manifest.PYTHON_MIN:
-        log.warn(f"Este proceso corre en Python {sys.version.split()[0]}; "
-                 f"el servidor necesita >= {'.'.join(map(str, manifest.PYTHON_MIN))}.")
+        log.warn(T("s3.pyver", cur=sys.version.split()[0],
+                   min=".".join(map(str, manifest.PYTHON_MIN))))
     if cfg.dry_run:
-        log.info(f"[dry-run] crearía venv en {cfg.venv_dir} e instalaría: "
-                 f"{', '.join(manifest.RUNTIME_DEPENDENCIES)}")
+        log.info(T("s3.dry", venv=cfg.venv_dir,
+                   deps=", ".join(manifest.RUNTIME_DEPENDENCIES)))
         return True
 
     real_py = _real_python((cfg.user_qgis_root,))
     if real_py is None:
-        log.err("No encontré un intérprete de Python real para crear el venv. "
-                "Instala QGIS (paso 2) o Python, y reintenta el paso 3.")
+        log.err(T("s3.nopy"))
         return False
-    log.info(f"Usando Python: {real_py}")
+    log.info(T("s3.using", py=real_py))
 
     if not (cfg.venv_dir / "pyvenv.cfg").exists():
-        log.info(f"Creando venv en {cfg.venv_dir}")
+        log.info(T("s3.creating", venv=cfg.venv_dir))
         rc = subprocess.run([real_py, "-m", "venv", str(cfg.venv_dir)]).returncode
         if rc != 0:
-            log.err("No se pudo crear el venv.")
+            log.err(T("s3.venverr"))
             return False
     py = cfg.venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / \
         ("python.exe" if sys.platform == "win32" else "python")
-    log.info("Actualizando pip e instalando dependencias fijadas…")
+    log.info(T("s3.pip"))
     subprocess.run([str(py), "-m", "pip", "install", "--upgrade", "pip"])
     rc = subprocess.run(
         [str(py), "-m", "pip", "install", *manifest.RUNTIME_DEPENDENCIES]
     ).returncode
     if rc != 0:
-        log.err("Falló la instalación de dependencias.")
+        log.err(T("s3.depserr"))
         return False
-    log.ok("Dependencias instaladas en el venv.")
+    log.ok(T("s3.ok"))
 
     # `uv` arranca el servidor MCP (paso 6). Lo aseguramos aquí y guardamos su
     # ruta absoluta para un config independiente del PATH.
     cfg._uv_path = _ensure_uv(real_py, log, cfg.dry_run)  # type: ignore[attr-defined]
-    cfg.status[3] = "venv + deps"
+    cfg.status[3] = T("st.venv")
     return True
 
 
 def step4_plugin(cfg: Config, log: Logger) -> bool:
-    log.step(4, "Plugin QGIS MCP (fork mejorado)")
+    log.step(4, T("s4.title"))
     dl = manifest.PLUGIN_FORK
     if cfg.plugin_url:
         dl = manifest.Download(key=dl.key, name=dl.name, url=cfg.plugin_url,
                                filename=dl.filename)
-        log.info(f"Usando URL de plugin indicada: {cfg.plugin_url}")
+        log.info(T("s4.url", url=cfg.plugin_url))
 
     zip_path = None
     try:
         zip_path = fetch_verified(dl, cfg, log)
     except Exception as exc:  # noqa: BLE001 - queremos el fallback
-        log.warn(f"No se pudo obtener el fork ({exc}).")
+        log.warn(T("s4.forkfail", exc=exc))
     if zip_path is None and not cfg.dry_run:
-        log.warn("Recurriendo al upstream original (nkarasiak, MIT).")
+        log.warn(T("s4.fallback"))
         zip_path = fetch_verified(manifest.PLUGIN_UPSTREAM, cfg, log)
     if zip_path is None:
         return cfg.dry_run  # en dry-run seguimos; si no, es fallo
 
     if cfg.dry_run:
-        log.info("[dry-run] extraería el ZIP y copiaría qgis_mcp_plugin/ + src/.")
+        log.info(T("s4.dry"))
         return True
 
     # Extraer y localizar la carpeta del plugin + el código del servidor.
@@ -671,13 +961,13 @@ def step4_plugin(cfg: Config, log: Logger) -> bool:
         zf.extractall(extract_dir)
     roots = [p for p in extract_dir.iterdir() if p.is_dir()]
     if not roots:
-        log.err("El ZIP del plugin está vacío.")
+        log.err(T("s4.zipempty"))
         return False
     repo_root = roots[0]
 
     plugin_src = repo_root / "qgis_mcp_plugin"
     if not (plugin_src / "metadata.txt").exists():
-        log.err("El repositorio no contiene qgis_mcp_plugin/metadata.txt.")
+        log.err(T("s4.nometa"))
         return False
 
     # Copiar el código del servidor MCP a server_dir (para el paso 6).
@@ -691,22 +981,22 @@ def step4_plugin(cfg: Config, log: Logger) -> bool:
             src = repo_root / extra
             if src.exists():
                 shutil.copy2(src, cfg.server_dir.parent / extra)
-        log.ok(f"Código del servidor MCP copiado a {cfg.server_dir}")
+        log.ok(T("s4.servercopied", dir=cfg.server_dir))
     else:
-        log.warn("El repo no trae src/; se usará el modo remoto (uvx) en el paso 6.")
+        log.warn(T("s4.nosrc"))
 
     # Guardar la ruta del plugin extraído para el paso 5.
     cfg._plugin_src = plugin_src  # type: ignore[attr-defined]
-    log.ok("Plugin obtenido y preparado.")
+    log.ok(T("s4.ok"))
     return True
 
 
 def step5_configure_qgis(cfg: Config, log: Logger) -> bool:
-    log.step(5, "Configurar QGIS (desplegar y habilitar el plugin)")
+    log.step(5, T("s5.title"))
     if cfg.dry_run:
         dest = cfg.qgis_plugins_dir() / "qgis_mcp_plugin"
-        log.info(f"[dry-run] copiaría el plugin extraído -> {dest}")
-        log.info("[dry-run] habilitaría 'qgis_mcp_plugin' en QGIS3.ini")
+        log.info(T("s5.dry_copy", dest=dest))
+        log.info(T("s5.dry_enable"))
         return True
 
     plugin_src = getattr(cfg, "_plugin_src", None)
@@ -716,36 +1006,35 @@ def step5_configure_qgis(cfg: Config, log: Logger) -> bool:
         cand = list(guess.glob("*/qgis_mcp_plugin")) if guess.exists() else []
         plugin_src = cand[0] if cand else None
     if plugin_src is None:
-        log.err("No encuentro el plugin extraído. Ejecuta antes el paso 4.")
+        log.err(T("s5.notfound"))
         return False
 
     dest = cfg.qgis_plugins_dir() / "qgis_mcp_plugin"
     if cfg.dry_run:
-        log.info(f"[dry-run] copiaría {plugin_src} -> {dest}")
-        log.info("[dry-run] habilitaría el plugin en QGIS3.ini")
+        log.info(T("s5.dry_copy2", src=plugin_src, dest=dest))
+        log.info(T("s5.dry_enable"))
         return True
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists():
         shutil.rmtree(dest)
     shutil.copytree(plugin_src, dest)
-    log.ok(f"Plugin copiado a {dest}")
+    log.ok(T("s5.copied", dest=dest))
 
     # Habilitar el plugin en la config de QGIS (QGIS3.ini / QGIS4.ini).
     ini = cfg.qgis_ini_path()
     try:
         _enable_plugin_in_ini(ini, "qgis_mcp_plugin", log)
     except Exception as exc:  # noqa: BLE001 - no es crítico
-        log.warn(f"No pude editar QGIS3.ini automáticamente ({exc}). "
-                 "Habilita 'QGIS MCP' a mano en Complementos.")
-    log.ok("QGIS configurado. Recuerda: Complementos → QGIS MCP → Start Server.")
+        log.warn(T("s5.iniwarn", exc=exc))
+    log.ok(T("s5.ok"))
     return True
 
 
 def _enable_plugin_in_ini(ini: Path, plugin_name: str, log: Logger) -> None:
     """Añade `PythonPlugins/<plugin>=true` en la sección [PythonPlugins]."""
     if not ini.exists():
-        log.warn(f"{ini} no existe todavía (abre QGIS una vez). Se omite.")
+        log.warn(T("ini.missing", ini=ini))
         return
     import configparser
     cp = configparser.ConfigParser()
@@ -757,11 +1046,11 @@ def _enable_plugin_in_ini(ini: Path, plugin_name: str, log: Logger) -> None:
     cp.set(section, plugin_name, "true")
     with ini.open("w", encoding="utf-8") as fh:
         cp.write(fh)
-    log.ok(f"Plugin habilitado en {ini.name}")
+    log.ok(T("ini.enabled", ini=ini.name))
 
 
 def step6_configure_claude(cfg: Config, log: Logger) -> bool:
-    log.step(6, "Configurar Claude Desktop (claude_desktop_config.json)")
+    log.step(6, T("s6.title"))
     cfg_path = cfg.claude_config_path
 
     # Ruta absoluta a uv (independiente del PATH; Claude lanza sin ver el PATH
@@ -791,9 +1080,9 @@ def step6_configure_claude(cfg: Config, log: Logger) -> bool:
         }
         mode = "remoto (uvx)"
 
-    log.info(f"Modo de servidor: {mode}")
+    log.info(T("s6.mode", mode=mode))
     if cfg.dry_run:
-        log.info(f"[dry-run] escribiría en {cfg_path}:")
+        log.info(T("s6.dry", path=cfg_path))
         log.info("    " + json.dumps({"mcpServers": {"qgis": entry}}, indent=2))
         return True
 
@@ -803,16 +1092,16 @@ def step6_configure_claude(cfg: Config, log: Logger) -> bool:
         # Respaldo antes de tocar nada del usuario.
         backup = cfg_path.with_suffix(f".json.bak-{_dt.datetime.now():%Y%m%d%H%M%S}")
         shutil.copy2(cfg_path, backup)
-        log.ok(f"Respaldo creado: {backup.name}")
+        log.ok(T("s6.backup", name=backup.name))
         try:
             data = json.loads(cfg_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            log.warn("El config existente no era JSON válido; se reemplaza.")
+            log.warn(T("s6.badjson"))
             data = {}
     data.setdefault("mcpServers", {})["qgis"] = entry
     cfg_path.write_text(json.dumps(data, indent=2, ensure_ascii=False),
                         encoding="utf-8")
-    log.ok(f"Config de Claude escrita en {cfg_path}")
+    log.ok(T("s6.written", path=cfg_path))
     return True
 
 
@@ -830,12 +1119,24 @@ STEPS = {
 # Interfaz de usuario / arranque
 # ─────────────────────────────────────────────────────────────────────────────
 
-BANNER = r"""
+_BANNERS = {
+    "es": r"""
 +==============================================================+
 |      QGIS MCP - Instalador ETL   ·   Distribucion publica    |
 |      Aprovisiona Claude Desktop + QGIS 3.44 LTR + plugin     |
 +==============================================================+
-"""
+""",
+    "pt": r"""
++==============================================================+
+|      QGIS MCP - Instalador ETL   ·   Distribuicao publica    |
+|      Prepara Claude Desktop + QGIS 3.44 LTR + plugin         |
++==============================================================+
+""",
+}
+
+
+def banner() -> str:
+    return _BANNERS.get(LANG, _BANNERS["es"])
 
 
 def _prompt_dir(prompt: str, default: Path) -> Path:
@@ -848,9 +1149,9 @@ def build_config(args: argparse.Namespace) -> Config:
         Path.home() / "qgis-mcp"
 
     if not args.non_interactive and not args.base_dir:
-        print(BANNER)
-        print("El usuario elige DÓNDE se instala todo. Enter = valor por defecto.\n")
-        default_base = _prompt_dir("Carpeta raíz para QGIS MCP:", default_base)
+        print(banner())
+        print(T("ui.choose"))
+        default_base = _prompt_dir(T("ui.rootdir"), default_base)
 
     base = default_base
     steps = {int(s) for s in args.steps.split(",") if s.strip()} if args.steps \
@@ -874,29 +1175,23 @@ def build_config(args: argparse.Namespace) -> Config:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Instalador ETL de QGIS MCP (transparente y auditable).")
-    parser.add_argument("--base-dir", help="Carpeta raíz de instalación.")
-    parser.add_argument("--profile", default="default", help="Perfil de QGIS.")
-    parser.add_argument("--steps", default="",
-                        help="Pasos a ejecutar, ej. '4,5,6'. Vacío = todos.")
-    parser.add_argument("--plugin-url", default="",
-                        help="URL del ZIP del plugin (sobreescribe el fork).")
-    parser.add_argument("--assume-installed", default="",
-                        help="Asume ya instalado y omite su instalación. "
-                             "Lista: claude,qgis (útil en modo desatendido).")
+    global LANG
+    LANG = _detect_lang(sys.argv[1:])
+    parser = argparse.ArgumentParser(description=T("h.desc"))
+    parser.add_argument("--base-dir", help=T("h.basedir"))
+    parser.add_argument("--profile", default="default", help=T("h.profile"))
+    parser.add_argument("--steps", default="", help=T("h.steps"))
+    parser.add_argument("--plugin-url", default="", help=T("h.pluginurl"))
+    parser.add_argument("--assume-installed", default="", help=T("h.assume"))
     parser.add_argument("--qgis-install", default="auto",
-                        choices=("auto", "msi", "user"),
-                        help="Cómo instalar QGIS si falta: 'msi' (estándar, "
-                             "requiere administrador), 'user' (en tu carpeta, "
-                             "SIN administrador), 'auto' (detecta permisos; "
-                             "por defecto).")
+                        choices=("auto", "msi", "user"), help=T("h.qgisinstall"))
+    parser.add_argument("--lang", default="auto", choices=("auto", "es", "pt"),
+                        help=T("h.lang"))
     parser.add_argument("--non-interactive", action="store_true",
-                        help="Sin preguntas (requiere --base-dir).")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Muestra el plan sin descargar ni instalar nada.")
+                        help=T("h.noninteractive"))
+    parser.add_argument("--dry-run", action="store_true", help=T("h.dryrun"))
     parser.add_argument("--skip-signature", action="store_true",
-                        help="Omite la verificación de firma (NO recomendado).")
+                        help=T("h.skipsig"))
     args = parser.parse_args()
 
     cfg = build_config(args)
@@ -904,22 +1199,22 @@ def main() -> int:
                  f"install-{_dt.datetime.now():%Y%m%d-%H%M%S}.log",
                  to_file=not cfg.dry_run)
 
-    print(BANNER)
-    log.info(f"Carpeta raíz : {cfg.base_dir}")
-    log.info(f"Descargas    : {cfg.downloads_dir}")
-    log.info(f"venv Python  : {cfg.venv_dir}")
-    log.info(f"Perfil QGIS  : {cfg.qgis_profile}")
-    log.info(f"Install QGIS : {cfg.qgis_install}"
-             + (" (sin admin → carpeta de usuario)"
-                if cfg.qgis_install == "user" else ""))
-    log.info(f"Pasos        : {sorted(cfg.steps)}")
-    log.info(f"Modo         : {'DRY-RUN (no toca nada)' if cfg.dry_run else 'real'}")
+    print(banner())
+    log.info(T("ui.root", v=cfg.base_dir))
+    log.info(T("ui.downloads", v=cfg.downloads_dir))
+    log.info(T("ui.venv", v=cfg.venv_dir))
+    log.info(T("ui.profile", v=cfg.qgis_profile))
+    log.info(T("ui.qgismode", v=cfg.qgis_install,
+               extra=(T("ui.qgismode_user") if cfg.qgis_install == "user" else "")))
+    log.info(T("ui.steps", v=sorted(cfg.steps)))
+    log.info(T("ui.lang"))
+    log.info(T("ui.mode", v=T("ui.mode_dry") if cfg.dry_run else T("ui.mode_real")))
     if cfg.skip_signature:
-        log.warn("Verificación de firma DESACTIVADA.")
+        log.warn(T("ui.sigoff"))
 
     if not args.non_interactive and not cfg.dry_run:
-        if input("\n¿Continuar? [s/N]: ").strip().lower() not in ("s", "y"):
-            log.info("Cancelado por el usuario.")
+        if input(T("ui.continue")).strip().lower() not in ("s", "y", "si", "sí", "sim"):
+            log.info(T("ui.cancelled"))
             return 130
 
     results: dict[int, bool] = {}
@@ -927,30 +1222,27 @@ def main() -> int:
         try:
             results[n] = STEPS[n](cfg, log)
         except KeyboardInterrupt:
-            log.err("Interrumpido por el usuario.")
+            log.err(T("ui.interrupted"))
             return 130
         except Exception as exc:  # noqa: BLE001 - reportar y seguir con resumen
-            log.err(f"Paso {n} lanzó una excepción: {exc}")
+            log.err(T("ui.exception", n=n, exc=exc))
             results[n] = False
         if not results[n]:
-            log.err(f"El paso {n} falló. Detengo la cadena ETL.")
+            log.err(T("ui.stepfail", n=n))
             break
 
-    _labels = {1: "Claude Desktop", 2: "QGIS", 3: "Dependencias Python",
-               4: "Plugin QGIS MCP", 5: "Configurar QGIS", 6: "Configurar Claude"}
     log.line("\n" + "=" * 62)
-    log.line("RESUMEN")
+    log.line(T("ui.summary"))
     for n in sorted(cfg.steps):
         mark = "✓" if results.get(n) else ("·" if n not in results else "✗")
         extra = f" — {cfg.status[n]}" if n in cfg.status else ""
-        log.line(f"  [{mark}] Paso {n}: {_labels.get(n, '')}{extra}")
+        log.line(T("ui.sumline", mark=mark, n=n, label=T(f"lbl.{n}"), extra=extra))
     ok = all(results.get(n) for n in cfg.steps)
     log.line("=" * 62)
     if ok:
-        log.ok("Instalación completa. Abre QGIS → Complementos → QGIS MCP → "
-               "Start Server, luego abre Claude Desktop.")
+        log.ok(T("ui.done"))
     else:
-        log.warn(f"Revisa el log: {log.log_path}")
+        log.warn(T("ui.checklog", path=log.log_path))
     return 0 if ok else 1
 
 
