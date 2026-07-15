@@ -1,6 +1,8 @@
 name: build-and-sign
 
-# Construye el .exe y lo firma con SignPath Foundation (gratis para OSS).
+# Construye el .exe y, SI SignPath está configurado (variable SIGNPATH_ORGANIZATION_ID
+# presente en el repo), lo firma con SignPath Foundation. Si NO está configurado
+# (p. ej. solicitud aún no aprobada), publica el .exe SIN firmar junto a su SHA-256.
 # Se dispara al publicar un tag vX.Y.Z, o manualmente desde la pestaña Actions.
 on:
   push:
@@ -43,9 +45,10 @@ jobs:
           path: dist/qgis-mcp-installer.exe
           if-no-files-found: error
 
-  # ── 2) Firmar con SignPath Foundation ───────────────────────────────────────
+  # ── 2) Firmar con SignPath Foundation (solo si ya está configurado) ─────────
   sign:
     needs: build
+    if: vars.SIGNPATH_ORGANIZATION_ID != ''
     runs-on: ubuntu-latest
     steps:
       - name: Enviar a firmar (SignPath)
@@ -68,4 +71,29 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: signed/qgis-mcp-installer.exe
+          fail_on_unmatched_files: true
+
+  # ── 3) Sin SignPath: publicar el .exe SIN firmar + su SHA-256 ───────────────
+  release-unsigned:
+    needs: build
+    if: vars.SIGNPATH_ORGANIZATION_ID == '' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: qgis-mcp-installer-unsigned
+          path: dist
+
+      - name: SHA-256 del binario (publícalo con la descarga)
+        run: |
+          cd dist
+          sha256sum qgis-mcp-installer.exe | tee SHA256SUMS.txt
+          cat SHA256SUMS.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Adjuntar el .exe (sin firmar) y su SHA-256 al Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/qgis-mcp-installer.exe
+            dist/SHA256SUMS.txt
           fail_on_unmatched_files: true

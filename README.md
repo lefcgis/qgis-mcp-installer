@@ -7,13 +7,25 @@ Empaquetable como un único `.exe` para que el usuario final no tenga que instal
 Python ni manejar archivos sueltos — pero **sin ofuscación ni evasión**: el código
 que va dentro es exactamente el de este repositorio, publicado y verificable.
 
-## Code signing
+## Integridad de los releases
 
-Free code signing for the Windows installer (`.exe`) is provided by
-[SignPath.io](https://signpath.io), with a certificate by the
-[SignPath Foundation](https://signpath.org). Signed releases are published on the
-project's [GitHub Releases](https://github.com/lefcgis/qgis-mcp-installer/releases)
-page together with their SHA-256 hash.
+Los `.exe` publicados en [GitHub Releases](https://github.com/lefcgis/qgis-mcp-installer/releases)
+**aún no llevan firma de código de un tercero**. En su lugar, cada release incluye
+su **hash SHA-256**, y el binario lo construye GitHub Actions directamente desde
+el código público de este repositorio (sin ofuscar), por lo que cualquiera puede
+auditarlo o reproducir la construcción.
+
+Para verificar tu descarga en PowerShell:
+
+```powershell
+Get-FileHash .\qgis-mcp-installer.exe -Algorithm SHA256
+# compara el resultado con el SHA-256 publicado en la página del release
+```
+
+> Se solicitó la firma gratuita de **SignPath Foundation** (jul 2026); pidieron que
+> el proyecto gane primero visibilidad pública (estrellas, usuarios, menciones) y
+> reaplicaremos más adelante. El workflow de firma ya está preparado y se activará
+> solo cuando haya certificado. Ver `SIGNING.md`.
 
 ## Qué hace (los 6 pasos del ETL)
 
@@ -88,9 +100,10 @@ python build_exe.py --clean
 Un `.exe` sin firmar dispara avisos de SmartScreen y antivirus. La forma correcta
 de generar confianza **no es esconderse, sino firmar**. Dos vías:
 
-- **Automática (recomendada, gratis para OSS)** — cada release se firma sola con
-  **SignPath Foundation** vía GitHub Actions. Ver **`SIGNING.md`** y el workflow
-  `.github/workflows/build-and-sign.yml`.
+- **Automática vía SignPath Foundation (PENDIENTE de aprobación)** — el workflow
+  `.github/workflows/build-and-sign.yml` ya está preparado para firmar cada
+  release; se activará cuando SignPath apruebe el proyecto (ver **`SIGNING.md`**).
+  Mientras tanto, el workflow publica el `.exe` **sin firmar** junto a su SHA-256.
 - **Manual** — con tu propio certificado, usando `sign.ps1`:
   ```powershell
   .\sign.ps1 -PfxPath "C:\certs\mi-cert.pfx" -Password "****"

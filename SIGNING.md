@@ -1,5 +1,12 @@
 # Firma del instalador con SignPath Foundation (gratis para OSS)
 
+> **ESTADO (jul 2026): solicitud enviada el 2026-07-07 y RECHAZADA por ahora.**
+> SignPath Foundation exige señales públicas de adopción (estrellas, forks,
+> contribuidores, artículos, menciones) y el proyecto es demasiado nuevo. Nos
+> invitaron explícitamente a **reaplicar cuando gane visibilidad**. Mientras
+> tanto, el workflow publica los releases **sin firmar, con SHA-256** (el job de
+> firma se activa solo cuando exista la variable `SIGNPATH_ORGANIZATION_ID`).
+
 El workflow `.github/workflows/build-and-sign.yml` construye el `.exe` y lo firma
 automáticamente con **SignPath Foundation**, el programa gratuito de SignPath para
 proyectos de código abierto. Esta guía cubre el alta (se hace **una vez**).
