@@ -15,7 +15,7 @@ Los `.exe` publicados en [GitHub Releases](https://github.com/lefcgis/qgis-mcp-i
 **aún no llevan firma de código de un tercero**. En su lugar, cada release incluye
 su **hash SHA-256**, y el binario lo construye GitHub Actions directamente desde
 el código público de este repositorio (sin ofuscar), por lo que cualquiera puede
-auditarlo o reproducir la construcción.
+auditarlo o reproducir la construcción. Solo recomendamos utilizar Windows PowerShell como administrador.
 
 Para verificar tu descarga en PowerShell:
 
