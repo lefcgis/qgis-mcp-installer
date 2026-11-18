@@ -2,182 +2,224 @@
 
 > 🇧🇷 [Leia esta documentação em português](README_pt-BR.md) · 🇪🇸 Estás leyendo la versión en español.
 
-Instalador **transparente y auditable** que aprovisiona de cero un equipo Windows
-para usar **QGIS** con **Claude AI** vía el Model Context Protocol (MCP).
+Instalador **transparente y auditable** que deja un equipo Windows listo para usar
+**QGIS** con **Claude AI** vía el Model Context Protocol (MCP): instala lo que
+falte, lo configura y **comprueba que el servidor MCP responde** antes de decir
+que terminó.
 
-Empaquetable como un único `.exe` para que el usuario final no tenga que instalar
-Python ni manejar archivos sueltos — pero **sin ofuscación ni evasión**: el código
-que va dentro es exactamente el de este repositorio, publicado y verificable.
+Versión actual: **2.0.0** — ver [`CHANGELOG.md`](CHANGELOG.md).
 
-## Integridad de los releases
+## Dos formas de instalar
 
-Los `.exe` publicados en [GitHub Releases](https://github.com/lefcgis/qgis-mcp-installer/releases)
-**aún no llevan firma de código de un tercero**. En su lugar, cada release incluye
-su **hash SHA-256**, y el binario lo construye GitHub Actions directamente desde
-el código público de este repositorio (sin ofuscar), por lo que cualquiera puede
-auditarlo o reproducir la construcción. Solo recomendamos utilizar Windows PowerShell como administrador.
+No necesitas Python ni permisos de administrador para ninguna de las dos.
 
-Para verificar tu descarga en PowerShell:
+### A. El `.exe` (lo más simple)
 
-```powershell
-Get-FileHash .\qgis-mcp-installer.exe -Algorithm SHA256
-# compara el resultado con el SHA-256 publicado en la página del release
+1. Descarga `qgis-mcp-installer.exe` desde
+   [Releases](https://github.com/lefcgis/qgis-mcp-installer/releases).
+2. Doble clic. Enter acepta los valores por defecto.
+
+El `.exe` **aún no lleva firma de código**, así que Windows puede mostrar el aviso
+azul de SmartScreen («Windows protegió su PC» → *Más información* → *Ejecutar de
+todas formas*) o un antivirus puede retenerlo. Si no te deja abrirlo, usa la
+forma B.
+
+### B. `instalar.cmd` (si Windows no deja abrir el `.exe`)
+
+1. En la página del repositorio: **Code → Download ZIP**, y **extrae el ZIP
+   completo**.
+2. Doble clic en `instalar.cmd`.
+
+`instalar.cmd` ejecuta exactamente el mismo código, pero sin ningún ejecutable
+propio: descarga `uv` con `curl.exe`, comprueba su SHA-256 con `certutil.exe` y
+lo extrae con `tar.exe` (las tres vienen con Windows 10/11), instala un Python
+propio y lanza `etl_installer.py`.
+
+### Con Python ya instalado (3.10 o superior)
+
+```bash
+python etl_installer.py
 ```
 
-> Se solicitó la firma gratuita de **SignPath Foundation** (jul 2026); pidieron que
-> el proyecto gane primero visibilidad pública (estrellas, usuarios, menciones) y
-> reaplicaremos más adelante. El workflow de firma ya está preparado y se activará
-> solo cuando haya certificado. Ver `SIGNING.md`.
-
-## Qué hace (los 6 pasos del ETL)
+## Qué hace (6 pasos + verificación)
 
 | Paso | Acción | Cómo |
 |------|--------|------|
-| 1 | Instala **Claude Desktop** | Descarga el instalador oficial (win x64) y lo ejecuta en silencio |
-| 2 | Instala **QGIS 3.44 LTR** | Con admin: MSI oficial vía `msiexec`. **Sin admin: OSGeo4W en tu carpeta de usuario (cero UAC)** |
-| 3 | Instala **dependencias de Python** | Crea un **venv aislado** con librerías fijadas y actualizadas |
-| 4 | Obtiene el **plugin QGIS MCP** | Descarga el fork mejorado de tu GitHub (con fallback al upstream) |
-| 5 | Configura **QGIS** | Copia el plugin al perfil y lo habilita en `QGIS3.ini` |
-| 6 | Configura **Claude** | Escribe `claude_desktop_config.json` (con respaldo previo) |
+| 1 | **Claude Desktop** | Lo detecta (versión MSIX o clásica). Si falta, descarga el paquete MSIX oficial, verifica su firma e intenta instalarlo; si Windows no lo permite, abre la página de descarga y sigue con el resto |
+| 2 | **QGIS 3.44 LTR** | Lo detecta. Si falta — con admin: MSI oficial. **Sin admin: OSGeo4W en tu carpeta de usuario (cero UAC)** |
+| 3 | **Entorno de Python** | Descarga `uv` (hash fijado) y un CPython 3.12 propio; instala las librerías en una carpeta aislada. No usa el Python del sistema ni el de QGIS |
+| 4 | **Plugin + servidor MCP** | Descarga el fork ([lefcgis/qgis-mcp](https://github.com/lefcgis/qgis-mcp), con fallback al upstream) e instala el servidor |
+| 5 | **Configura QGIS** | Copia el plugin al perfil activo y lo habilita (crea el perfil si QGIS nunca se abrió) |
+| 6 | **Configura Claude** | Añade la entrada `qgis` a `claude_desktop_config.json` sin tocar lo demás, con respaldo |
+| 7 | **Verificación** | Arranca el servidor MCP **igual que lo hará Claude Desktop** y comprueba que responde y lista sus herramientas |
 
-*Extract* = descargas · *Transform* = verificación de integridad + preparación ·
-*Load* = instalación y configuración.
+Si el paso 7 no pasa, el instalador **no** dice «instalación completa»: dice qué
+falló y dónde está el log.
 
-## Sin permisos de administrador: no hay problema
+Al terminar:
 
-**No necesitas ser administrador del equipo.** Si QGIS no está instalado, el
-paso 2 detecta automáticamente tus permisos:
+1. Abre QGIS → menú **Complementos → QGIS MCP → Start Server**.
+2. Cierra Claude Desktop **por completo** (icono de la bandeja del sistema →
+   *Salir*; cerrar la ventana no basta) y vuelve a abrirlo.
+3. En Claude, pide: «haz ping a QGIS».
 
-- **Con administrador** → instala el MSI oficial de QGIS (a nivel máquina,
-  en `C:\Program Files`), como siempre.
-- **Sin administrador** → usa el **instalador de red OSGeo4W oficial** (firmado
-  por la OSGeo Foundation y verificado antes de ejecutarse) para instalar el
-  mismo QGIS LTR completo (`qgis-ltr-full`: Python, GDAL, GRASS, processing)
-  dentro de **tu carpeta de usuario** (`<raíz>/qgis`). Cero ventanas de UAC.
+## Dónde queda cada cosa
 
-También puedes forzar la vía con `--qgis-install msi|user|auto` (por defecto
-`auto`). Claude Desktop siempre se instala por-usuario, así que **el flujo
-completo funciona de punta a punta sin elevación**:
+Todo vive en la carpeta raíz que elijas (por defecto `C:\Users\<tú>\qgis-mcp`):
 
-```bash
-# instalación completa garantizada sin administrador
-python etl_installer.py --qgis-install user
+```
+qgis-mcp\
+├── tools\uv\          uv.exe (versión y hash fijados en manifest.py)
+├── python\            CPython 3.12 propio (no es el del sistema)
+├── env\
+│   ├── site-packages\ librerías del servidor (mcp, pydantic, …)
+│   └── run_server.py  lanzador que ejecuta Claude Desktop
+├── server\            copia auditable del código del servidor (src/, pyproject.toml)
+├── qgis\              QGIS LTR, solo si se instaló sin administrador
+├── downloads\         lo descargado
+└── logs\              un log con fecha por cada ejecución
 ```
 
-## Habla tu idioma: español y portugués 🇪🇸🇧🇷
+Fuera de esa carpeta solo se toca:
 
-El instalador es **bilingüe**: detecta el idioma de tu Windows y muestra todo el
-asistente (preguntas, progreso, resumen final) en **español** o en **portugués
-de Brasil**. También puedes forzarlo:
+- `%APPDATA%\QGIS\QGIS3\profiles\<perfil>\` — el plugin y **una línea** de
+  `QGIS3.ini` (con respaldo `QGIS3.ini.bak-qgismcp-<fecha>`).
+- `%APPDATA%\Claude\claude_desktop_config.json` — la entrada `mcpServers.qgis`
+  (con respaldo `.bak-<fecha>`).
 
-```bash
-python etl_installer.py --lang pt   # assistente em português
-python etl_installer.py --lang es   # asistente en español
-# por defecto: --lang auto (detecta el idioma de Windows)
+La entrada que se escribe en Claude es:
+
+```json
+{
+  "mcpServers": {
+    "qgis": {
+      "command": "C:\\Users\\<tú>\\qgis-mcp\\python\\cpython-3.12.x-windows-x86_64-none\\python.exe",
+      "args": ["-I", "C:\\Users\\<tú>\\qgis-mcp\\env\\run_server.py"]
+    }
+  }
+}
 ```
 
-## Detección: no reinstala lo que ya tienes
+Rutas absolutas: no depende del `PATH` ni del directorio de trabajo.
 
-Antes de instalar Claude (paso 1) y QGIS (paso 2), el ETL **detecta** si ya están
-en el sistema, muestra la **versión** encontrada y te **pregunta** si ya cuentas
-con ese software:
-
-- **Si ya lo tienes** → omite esa instalación y pasa directo a las dependencias
-  de Python, el plugin y la configuración. El artefacto deja todo listo sin
-  reinstalar nada.
-- **Si no tienes nada** → descarga e instala como estaba previsto.
-
-La detección es consciente de la versión mayor de QGIS: despliega el plugin en el
-perfil **QGIS4** o **QGIS3** según cuál tengas (probado con QGIS 4.0.0 y 3.44 LTR).
-Si tu QGIS es anterior a 3.28, avisa (el plugin exige ≥ 3.28).
-
-En modo desatendido usa la detección automática, o fuerza el resultado con
-`--assume-installed`:
+## Opciones
 
 ```bash
-# "Ya tengo Claude y QGIS; solo configúrame el resto"
-python etl_installer.py --non-interactive --base-dir "D:/QGIS-Claude" \
-    --assume-installed claude,qgis
-```
-
-## Uso
-
-```bash
-# Asistente interactivo (el usuario elige las carpetas)
-python etl_installer.py
-
 # Ver el plan completo SIN tocar el sistema
-python etl_installer.py --non-interactive --base-dir "D:/QGIS-Claude" --dry-run
+python etl_installer.py --dry-run
 
-# Instalación desatendida completa
-python etl_installer.py --non-interactive --base-dir "D:/QGIS-Claude"
+# Instalación desatendida
+python etl_installer.py --non-interactive --base-dir "C:/qgis-mcp"
 
-# Solo algunos pasos (ej. re-desplegar el plugin y reconfigurar)
-python etl_installer.py --steps 4,5,6
+# "Ya tengo Claude y QGIS; solo configúrame el resto"
+python etl_installer.py --non-interactive --assume-installed claude,qgis
 
-# Usar tu fork concreto sin recompilar
-python etl_installer.py --plugin-url "https://github.com/<TU_USUARIO>/qgis-mcp/archive/refs/heads/main.zip"
+# Solo algunos pasos (re-desplegar el plugin, reconfigurar y verificar)
+python etl_installer.py --steps 4-7
+
+# Solo verificar una instalación existente
+python etl_installer.py --steps 7
+
+# QGIS sin administrador aunque seas administrador
+python etl_installer.py --qgis-install user
+
+# Que el servidor del plugin arranque solo al abrir QGIS (sin pulsar Start Server)
+python etl_installer.py --autostart
+
+# Otro perfil de QGIS (por defecto: el perfil activo)
+python etl_installer.py --profile trabajo
+
+# Otro fork del plugin
+python etl_installer.py --plugin-url "https://github.com/<USUARIO>/qgis-mcp/archive/refs/heads/main.zip"
+
+# Idioma (por defecto detecta el de Windows): es | pt
+python etl_installer.py --lang pt
+
+# Quitar el plugin y la entrada de Claude (no desinstala Claude ni QGIS)
+python etl_installer.py --uninstall
 ```
 
-El usuario elige **todas** las carpetas de instalación (raíz, descargas, venv,
-código del servidor). Cada ejecución deja un **log con fecha** en `<raíz>/logs/`.
+Las mismas opciones valen para `qgis-mcp-installer.exe` e `instalar.cmd`.
 
-## Construir el `.exe`
+**Códigos de salida:** `0` todo correcto · `1` un paso falló · `2` completado,
+pero queda algo por hacer a mano (se indica qué) · `130` cancelado.
 
-```bash
-python -m pip install -r requirements-build.txt
-python build_exe.py --clean
-# -> dist/qgis-mcp-installer.exe
-```
+## Si algo falla
 
-### Firma de código (recomendado para distribución pública)
+| Síntoma | Causa habitual | Qué hacer |
+|---|---|---|
+| Windows no deja abrir el `.exe` | SmartScreen / antivirus / Smart App Control: el `.exe` no está firmado | Usa `instalar.cmd` |
+| Paso 1: «Windows no permitió la instalación automática» | El MSIX de Claude exige administrador en muchos equipos | Instálalo desde <https://claude.com/download>; la configuración ya quedó escrita, no hace falta repetir el instalador |
+| Paso 2: «la carpeta … es demasiado larga» | OSGeo4W no admite rutas largas (límite de 260 de Windows) | Elige una raíz corta, p. ej. `C:\qgis-mcp` |
+| Paso 2: espacio insuficiente | QGIS necesita ~6 GB entre descarga e instalación | Libera espacio u otra unidad con `--base-dir` |
+| Pasos 3–4: falla una descarga | Proxy, antivirus o sin internet | Reintenta; el instalador ya hace 3 intentos por descarga |
+| Paso 7: «el servidor MCP NO respondió» | Un antivirus bloqueó el Python propio | Añade una excepción para la carpeta raíz y ejecuta `--steps 3-7` |
+| Claude no muestra las herramientas de QGIS | Claude Desktop no se reinició del todo | Bandeja del sistema → *Salir* y volver a abrir |
+| Claude las muestra pero «no conecta con QGIS» | Falta pulsar *Start Server* en QGIS | Complementos → QGIS MCP → Start Server |
+| El plugin no aparece en QGIS | Se instaló en otro perfil | `--profile <nombre>` y `--steps 5,7` |
 
-Un `.exe` sin firmar dispara avisos de SmartScreen y antivirus. La forma correcta
-de generar confianza **no es esconderse, sino firmar**. Dos vías:
+Cada ejecución deja un log completo en `<raíz>\logs\`. Si pides ayuda, adjunta
+ese archivo.
 
-- **Automática vía SignPath Foundation (PENDIENTE de aprobación)** — el workflow
-  `.github/workflows/build-and-sign.yml` ya está preparado para firmar cada
-  release; se activará cuando SignPath apruebe el proyecto (ver **`SIGNING.md`**).
-  Mientras tanto, el workflow publica el `.exe` **sin firmar** junto a su SHA-256.
-- **Manual** — con tu propio certificado, usando `sign.ps1`:
-  ```powershell
-  .\sign.ps1 -PfxPath "C:\certs\mi-cert.pfx" -Password "****"
-  # o con certificado EV en token de hardware:
-  .\sign.ps1 -Thumbprint "A1B2C3..."
-  ```
-
-Publica siempre el **SHA-256** del `.exe` junto a la descarga (lo generan tanto
-`sign.ps1` como el workflow) para verificación independiente del certificado.
+Para probarlo en un equipo nuevo paso a paso, ver [`TESTING.md`](TESTING.md).
 
 ## Integridad y seguridad (por diseño)
 
-- **Firma Authenticode**: los instaladores de Claude y QGIS se verifican por
-  publisher (`Anthropic`, `QGIS`) y validez de firma **antes** de ejecutarse.
-  Nada corre a ciegas. (`--skip-signature` existe pero avisa; no lo uses en
-  distribución.)
-- **SHA-256 opcional**: fija hashes en `manifest.py` para builds reproducibles.
-- **venv aislado**: las dependencias de Python NUNCA tocan el Python del sistema
-  ni el de QGIS.
-- **Respaldo**: el `claude_desktop_config.json` existente se respalda antes de
-  modificarlo.
 - **Todo declarado en claro**: cada URL que se descarga vive en `manifest.py`.
+- **Firma Authenticode** antes de ejecutar: Claude (`Anthropic`), QGIS y
+  OSGeo4W (`OPEN SOURCE GEOSPATIAL`). Un archivo que no pasa la verificación se
+  borra y no se ejecuta.
+- **SHA-256 fijado** para `uv`, igual al que publica su propio release.
+- **Aislado**: nada se instala en el Python del sistema ni en el de QGIS.
+- **Respaldo** de `claude_desktop_config.json` y de `QGIS3.ini` antes de tocarlos.
+- **Sin ejecutables propios sin firma en tiempo de ejecución**: el servidor MCP
+  se lanza con el `python.exe` de la distribución, no con un lanzador de entorno
+  virtual (Smart App Control los bloquea).
 
 > ⚠️ El plugin QGIS MCP expone la herramienta `execute_code`, que ejecuta código
 > Python/PyQGIS arbitrario en la máquina. Instálalo solo desde fuentes en las que
 > confíes y no dejes el servidor MCP activo si no lo estás usando.
 
-## Estructura del proyecto
+### Integridad de los releases
+
+Los `.exe` de [Releases](https://github.com/lefcgis/qgis-mcp-installer/releases)
+los construye GitHub Actions desde el código público de este repositorio, sin
+ofuscar, y cada release publica su **SHA-256**:
+
+```powershell
+Get-FileHash .\qgis-mcp-installer.exe -Algorithm SHA256
+# compara con el SHA256SUMS.txt del release
+```
+
+Se solicitó la firma gratuita de **SignPath Foundation** (jul 2026); pidieron que
+el proyecto gane primero visibilidad pública. El workflow de firma está preparado
+y se activará cuando haya certificado. Ver [`SIGNING.md`](SIGNING.md).
+
+## Desarrollo
+
+```bash
+# Pruebas unitarias (solo librería estándar)
+python -m unittest discover -s tests -v
+
+# Construir el .exe
+python -m pip install -r requirements-build.txt
+python build_exe.py --clean        # -> dist/qgis-mcp-installer.exe
+```
 
 ```
-qgis_mcp_installer/
-├── etl_installer.py         # el ETL (solo librería estándar de Python)
-├── manifest.py              # ÚNICA fuente de URLs, versiones y checksums
-├── build_exe.py             # empaqueta el .exe con PyInstaller (sin ofuscar)
-├── requirements-build.txt   # PyInstaller fijado (solo para construir)
-├── LICENSE                  # MIT: Karasiak (original) + Ferrer (mejoras)
-├── UPSTREAM_REVIEW.md        # errores/mejoras hallados en nkarasiak/qgis-mcp
-└── fork_patch/              # kit para publicar tu fork mejorado (paso 4)
-    ├── LICENSE  ├── NOTICE  └── PUBLISH.md
+qgis-mcp-installer/
+├── etl_installer.py         el instalador (solo librería estándar de Python)
+├── manifest.py              ÚNICA fuente de URLs, versiones y hashes
+├── messages.py              textos en español y portugués
+├── instalar.cmd             arranque sin Python ni .exe
+├── build_exe.py             empaqueta el .exe con PyInstaller (sin ofuscar)
+├── tests/                   pruebas unitarias
+├── .github/workflows/       CI (pruebas en Windows limpio) y release
+├── TESTING.md               cómo probarlo en un equipo nuevo
+├── CHANGELOG.md             cambios por versión
+├── SIGNING.md  sign.ps1     firma de código
+├── UPSTREAM_REVIEW.md       revisión de nkarasiak/qgis-mcp
+└── fork_patch/              kit para publicar el fork del plugin
 ```
 
 ## Créditos y licencia

@@ -26,11 +26,19 @@ jobs:
         with:
           python-version: "3.12"   # coincide con el Python de QGIS 3.44 LTR
 
+      - name: Pruebas unitarias
+        run: python -m unittest discover -s tests -v
+
       - name: Instalar dependencias de build
         run: python -m pip install -r requirements-build.txt
 
       - name: Construir el .exe (sin ofuscar)
         run: python build_exe.py --clean
+
+      # No se publica un .exe que no instale: pasos 3 a 7 reales en el runner,
+      # con la verificación final del servidor MCP.
+      - name: Probar el .exe (instalación real, pasos 3-7)
+        run: .\dist\qgis-mcp-installer.exe --non-interactive --base-dir "$env:RUNNER_TEMP\rel" --steps 3-7 --assume-installed claude,qgis
 
       - name: SHA-256 del binario SIN firmar (traza)
         run: |

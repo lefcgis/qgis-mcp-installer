@@ -1,0 +1,103 @@
+name: ci
+
+# Prueba el instalador en un Windows limpio (sin QGIS, sin Claude, sin nada
+# configurado): pruebas unitarias, plan en seco, y una instalación REAL de los
+# pasos 3 a 7 con las tres formas de arranque (código fuente, .exe, instalar.cmd).
+# El paso 7 arranca el servidor MCP y exige que responda.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "Instalación completa: también QGIS sin administrador (~15 min)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Pruebas unitarias
+        run: python -m unittest discover -s tests -v
+
+      - name: Plan en seco (es y pt)
+        run: |
+          python etl_installer.py --non-interactive --dry-run --force-install claude,qgis --lang es
+          python etl_installer.py --non-interactive --dry-run --force-install claude,qgis --lang pt
+
+      - name: Instalación real, pasos 3-7, desde el código fuente
+        run: python etl_installer.py --non-interactive --base-dir "$env:RUNNER_TEMP\src run" --steps 3-7 --assume-installed claude,qgis
+
+      - name: Repetir la instalación (debe ser idempotente)
+        run: python etl_installer.py --non-interactive --base-dir "$env:RUNNER_TEMP\src run" --steps 3-7 --assume-installed claude,qgis
+
+      - name: Construir el .exe
+        run: |
+          python -m pip install -r requirements-build.txt
+          python build_exe.py --clean
+
+      - name: Instalación real, pasos 3-7, con el .exe
+        run: .\dist\qgis-mcp-installer.exe --non-interactive --base-dir "$env:RUNNER_TEMP\exe" --steps 3-7 --assume-installed claude,qgis
+
+      - name: Instalación real, pasos 3-7, con instalar.cmd
+        shell: cmd
+        run: instalar.cmd --non-interactive --steps 3-7 --assume-installed claude,qgis
+
+      # El .exe ya probado queda descargable desde la página de esta ejecución
+      # (Actions -> ci -> Artifacts), para probarlo en otro equipo sin publicar
+      # todavía un release.
+      - name: Guardar el .exe probado
+        uses: actions/upload-artifact@v4
+        with:
+          name: qgis-mcp-installer-exe
+          path: dist/qgis-mcp-installer.exe
+          if-no-files-found: error
+
+      - name: Desinstalar
+        run: python etl_installer.py --non-interactive --base-dir "$env:RUNNER_TEMP\exe" --uninstall
+
+      - name: Guardar los logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-ci
+          path: |
+            ${{ runner.temp }}\src run\logs\
+            ${{ runner.temp }}\exe\logs\
+            ~\qgis-mcp\logs\
+          if-no-files-found: ignore
+
+  # Instalación completa de QGIS sin administrador. Tarda y descarga ~0.7 GB,
+  # así que solo corre a pedido (Actions -> ci -> Run workflow -> full).
+  full:
+    if: github.event_name == 'workflow_dispatch' && inputs.full
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalación completa, pasos 2-7 (QGIS en carpeta de usuario)
+        run: python etl_installer.py --non-interactive --base-dir "C:\qm" --steps 2-7 --qgis-install user --assume-installed claude
+
+      - name: Guardar los logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-full
+          path: C:\qm\logs\
+          if-no-files-found: ignore

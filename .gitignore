@@ -1,8 +1,8 @@
-# Artefactos de construcción (SignPath/CI los genera desde el código)
+# Artefactos de construcción (CI los genera desde el código)
 dist/
 build/
 *.exe
-*.spec.bak
+*.spec
 
 # Firma / secretos — nunca subir
 *.pfx
@@ -12,6 +12,9 @@ build/
 # Logs generados por el instalador
 logs/
 *.log
+
+# Respaldos locales
+bk/
 
 # Python
 __pycache__/

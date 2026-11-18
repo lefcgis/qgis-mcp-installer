@@ -5,8 +5,12 @@ build_exe.py — Empaqueta el ETL como un único .exe autocontenido (Windows).
 QUÉ HACE Y QUÉ NO
 -----------------
 SÍ:  produce `dist/qgis-mcp-installer.exe`, un binario de un solo archivo que
-     incluye el intérprete de Python y `manifest.py`, para que el usuario final
-     no tenga que instalar Python ni manejar archivos .py sueltos.
+     incluye el intérprete de Python, `manifest.py` y `messages.py`, para que el
+     usuario final no tenga que instalar Python ni manejar archivos .py sueltos.
+
+OJO: un .exe sin firmar NO arranca en equipos con Smart App Control activado
+     (Windows 11). Para esos equipos está `instalar.cmd`, que ejecuta este mismo
+     código con herramientas firmadas. Ver README, "Dos formas de instalar".
 
 NO:  no ofusca, no cifra, no empaqueta anti-análisis ni intenta evadir
      antivirus. El código fuente que va dentro es EXACTAMENTE el de este
@@ -69,9 +73,9 @@ def main() -> int:
         "--onefile",                 # un solo .exe
         "--console",                 # instalador de consola (muestra el progreso)
         "--name", APP_NAME,
-        # manifest.py se importa en runtime: lo incluimos como módulo.
-        "--add-data", f"{HERE / 'manifest.py'}{';' if sys.platform == 'win32' else ':'}.",
+        # manifest.py y messages.py son módulos del propio instalador.
         "--hidden-import", "manifest",
+        "--hidden-import", "messages",
         # Sin UPX ni strip: nada de reducir/ofuscar el binario.
         "--noupx",
         str(ENTRY),

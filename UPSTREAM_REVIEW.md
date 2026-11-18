@@ -12,6 +12,13 @@ MCP, tests (TDD + stress + concurrencia), benchmarks, CI de release, un
 con prefijo de longitud. Por eso **la recomendación es basar el fork mejorado en
 el upstream 0.5.0**, no en el fork antiguo.
 
+> **Nota del 2026-11-18.** Esta revisión describe el upstream **0.5.0**. Al
+> 2026-11-18 el upstream va por la **0.15.3** y el fork `lefcgis/qgis-mcp`, que es
+> lo que instala este ETL, sigue en la **0.5.0**. El instalador funciona con
+> cualquiera de los dos (se probó con el fork), pero el fork está diez versiones
+> menores por detrás; sincronizarlo es trabajo pendiente del fork, no de este
+> repositorio.
+
 ## Hallazgo confirmado (defecto real)
 
 ### 1. Inconsistencia de licencia — GPL v2 vs MIT
