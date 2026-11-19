@@ -67,15 +67,26 @@ jobs:
       - name: Desinstalar
         run: python etl_installer.py --non-interactive --base-dir "$env:RUNNER_TEMP\exe" --uninstall
 
+      # upload-artifact no acepta rutas de distintas unidades (D: y C:) en un
+      # mismo artefacto: primero se copian los logs dentro del repositorio.
+      - name: Reunir los logs
+        if: always()
+        run: |
+          $i = 0
+          foreach ($d in "$env:RUNNER_TEMP\src run\logs", "$env:RUNNER_TEMP\exe\logs", "$env:USERPROFILE\qgis-mcp\logs") {
+            $i++
+            if (Test-Path $d) {
+              New-Item -ItemType Directory -Force "ci-logs\$i" | Out-Null
+              Copy-Item "$d\*" "ci-logs\$i" -Recurse -Force
+            }
+          }
+
       - name: Guardar los logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: logs-ci
-          path: |
-            ${{ runner.temp }}\src run\logs\
-            ${{ runner.temp }}\exe\logs\
-            ~\qgis-mcp\logs\
+          path: ci-logs/
           if-no-files-found: ignore
 
   # Instalación completa de QGIS sin administrador. Tarda y descarga ~0.7 GB,
