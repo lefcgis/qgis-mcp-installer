@@ -7,7 +7,7 @@ Instalador **transparente y auditable** que deja un equipo Windows listo para us
 falte, lo configura y **comprueba que el servidor MCP responde** antes de decir
 que terminó.
 
-Versión actual: **2.0.0** — ver [`CHANGELOG.md`](CHANGELOG.md).
+Versión actual: **2.1.0** — ver [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Dos formas de instalar
 
@@ -45,8 +45,8 @@ python etl_installer.py
 
 | Paso | Acción | Cómo |
 |------|--------|------|
-| 1 | **Claude Desktop** | Lo detecta (versión MSIX o clásica). Si falta, descarga el paquete MSIX oficial, verifica su firma e intenta instalarlo; si Windows no lo permite, abre la página de descarga y sigue con el resto |
-| 2 | **QGIS 3.44 LTR** | Lo detecta. Si falta — con admin: MSI oficial. **Sin admin: OSGeo4W en tu carpeta de usuario (cero UAC)** |
+| 1 | **Claude Desktop** | Lo detecta (MSIX, por usuario o clásica). Si falta, descarga el `Setup.exe` oficial de Anthropic, verifica su firma e instala **por usuario, sin administrador**; después lo lleva a **la última versión estable** que publica el canal oficial (`RELEASES`) y comprueba la versión y la firma del `claude.exe` instalado. Si ya estaba instalado, lo actualiza cuando es una instalación por usuario |
+| 2 | **QGIS 3.44 LTR** | Lo detecta **leyendo la versión del binario**; un QGIS de otra serie (3.40, 4.x) no cuenta. Si falta — con admin: el último MSI 3.44.x de qgis.org. **Sin admin: OSGeo4W en tu carpeta de usuario (cero UAC)**. Tras instalar vuelve a leer la versión y, si no es 3.44.x, el paso falla. Si hay un parche nuevo y la instalación es la propia, la actualiza |
 | 3 | **Entorno de Python** | Descarga `uv` (hash fijado) y un CPython 3.12 propio; instala las librerías en una carpeta aislada. No usa el Python del sistema ni el de QGIS |
 | 4 | **Plugin + servidor MCP** | Descarga el fork ([lefcgis/qgis-mcp](https://github.com/lefcgis/qgis-mcp), con fallback al upstream) e instala el servidor |
 | 5 | **Configura QGIS** | Copia el plugin al perfil activo y lo habilita (crea el perfil si QGIS nunca se abrió) |
@@ -149,7 +149,10 @@ pero queda algo por hacer a mano (se indica qué) · `130` cancelado.
 | Síntoma | Causa habitual | Qué hacer |
 |---|---|---|
 | Windows no deja abrir el `.exe` | SmartScreen / antivirus / Smart App Control: el `.exe` no está firmado | Usa `instalar.cmd` |
-| Paso 1: «Windows no permitió la instalación automática» | El MSIX de Claude exige administrador en muchos equipos | Instálalo desde <https://claude.com/download>; la configuración ya quedó escrita, no hace falta repetir el instalador |
+| Paso 1: «No pude resolver la dirección oficial…» / «no dejó la aplicación instalada» | Sin internet, proxy o antivirus que bloquea `downloads.claude.ai` | Instálalo desde <https://claude.com/download>; la configuración ya quedó escrita, no hace falta repetir el instalador |
+| Paso 1: Claude quedó en una versión anterior a la del canal | La actualización no pudo completarse | Abre Claude Desktop (se actualiza solo) o repite `--steps 1` |
+| Paso 2: «qgis-ltr … ya es la X, que no es de la serie 3.44 LTR» | OSGeo4W pasó a otra serie LTR | El instalador no instala otra serie. Usa `--qgis-install msi` (admin) o espera una versión nueva del instalador |
+| Paso 7: «El QGIS instalado es X, NO de la serie 3.44 LTR» | Solo hay un QGIS de otra serie | Ejecuta `--steps 2 --force-install qgis` |
 | Paso 2: «la carpeta … es demasiado larga» | OSGeo4W no admite rutas largas (límite de 260 de Windows) | Elige una raíz corta, p. ej. `C:\qgis-mcp` |
 | Paso 2: espacio insuficiente | QGIS necesita ~6 GB entre descarga e instalación | Libera espacio u otra unidad con `--base-dir` |
 | Pasos 3–4: falla una descarga | Proxy, antivirus o sin internet | Reintenta; el instalador ya hace 3 intentos por descarga |

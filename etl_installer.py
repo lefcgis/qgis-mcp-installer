@@ -6,9 +6,12 @@ QGIS MCP — Instalador ETL (Extract · Transform · Load)
 Aprovisiona de cero un equipo Windows para usar QGIS con Claude AI vía el
 Model Context Protocol, en 6 pasos + una verificación final:
 
-    1. Claude Desktop         (detecta; si falta, descarga el MSIX oficial)
-    2. QGIS 3.44 LTR          (detecta; si falta, instala. SIN admin usa
-                               OSGeo4W en la carpeta del usuario — cero UAC)
+    1. Claude Desktop         (detecta; si falta, instala el Setup.exe oficial
+                               por usuario —sin admin— y lo deja en la última
+                               versión estable del canal de Anthropic)
+    2. QGIS 3.44 LTR          (detecta; si falta, instala el último parche de la
+                               serie 3.44 y lee la versión del binario. SIN
+                               admin usa OSGeo4W en la carpeta del usuario)
     3. Entorno de Python      (uv + CPython propio + carpeta de librerías
                                aislada; no depende del Python del sistema ni
                                del de QGIS, ni crea ejecutables sin firma)
@@ -45,6 +48,8 @@ Códigos de salida: 0 = todo correcto · 1 = un paso falló ·
 from __future__ import annotations
 
 import argparse
+import bz2
+import dataclasses
 import datetime as _dt
 import json
 import os
@@ -65,7 +70,7 @@ from pathlib import Path
 import manifest
 from messages import MSG
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 IS_WIN = sys.platform == "win32"
 FROZEN = bool(getattr(sys, "frozen", False))
@@ -474,6 +479,43 @@ def run(cmd: list, log: Logger, env: dict[str, str] | None = None,
     return rc
 
 
+def run_to_file(cmd: list, log: Logger, timeout: int,
+                env: dict[str, str] | None = None) -> int:
+    """Ejecuta un programa con tiempo máximo y su salida a un archivo temporal.
+
+    Squirrel (Setup.exe / Update.exe de Claude Desktop) puede dejar procesos
+    hijos vivos que heredan la salida: con una tubería, leer hasta el final
+    nunca terminaría. Con un archivo se espera solo al proceso. Devuelve el
+    código de salida, o -1 si no arrancó o se agotó el tiempo.
+    """
+    cmd = [str(c) for c in cmd]
+    log.file("  $ " + subprocess.list2cmdline(cmd))
+    import tempfile
+    with tempfile.TemporaryFile() as out:
+        try:
+            proc = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT,
+                                    stdin=subprocess.DEVNULL, env=env)
+        except OSError as exc:
+            log.err(T("run.fail", exe=cmd[0], exc=exc))
+            return -1
+        try:
+            rc = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            log.err(T("run.timeout", exe=Path(cmd[0]).name, n=timeout))
+            rc = -1
+        out.seek(0)
+        text = _decode(out.read())
+    # Update.exe imprime un porcentaje por línea: en el log basta un resumen.
+    lines = [ln.rstrip() for ln in text.splitlines()
+             if ln.strip() and not ln.strip().isdigit()]
+    for ln in lines[-80:]:
+        log.file(f"    | {ln}")
+    log.file(f"  -> rc={rc}")
+    return rc
+
+
 def _is_admin() -> bool:
     """True si el proceso corre con permisos de administrador (Windows)."""
     if not IS_WIN:
@@ -687,8 +729,76 @@ def fetch_verified(dl: "manifest.Download", cfg: Config, log: Logger) -> Path | 
 # Detección de software ya instalado + confirmación del usuario
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _http_get(url: str, timeout: float = 30.0, tries: int = 3) -> bytes:
+    """GET con reintentos y espera creciente. DownloadError si no se logra."""
+    last: Exception | None = None
+    for attempt in range(1, tries + 1):
+        req = urllib.request.Request(
+            url, headers={"User-Agent": f"qgis-mcp-etl/{__version__}"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as exc:
+            last = exc
+            if 400 <= exc.code < 500 and exc.code not in (408, 429):
+                break
+        except (urllib.error.URLError, OSError) as exc:
+            last = exc
+        if attempt < tries:
+            time.sleep(2 * attempt)
+    raise DownloadError(f"{url}: {last}")
+
+
+def _file_version(path: Path) -> str | None:
+    """Versión que declara el propio ejecutable (recurso de versión de Windows)."""
+    if not IS_WIN:
+        return None
+    rc, out, _ = _ps(
+        "(Get-Item -LiteralPath $env:QMI_P).VersionInfo.ProductVersion",
+        {"QMI_P": str(path)}, timeout=60)
+    ver = out.strip().splitlines()[0].strip() if rc == 0 and out.strip() else ""
+    return ver or None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Claude Desktop: instalaciones existentes y canal oficial de versiones
+# ─────────────────────────────────────────────────────────────────────────────
+
+CLAUDE_FEED_RE = re.compile(
+    r"^\s*[0-9A-Fa-f]{40}\s+AnthropicClaude-(\d+(?:\.\d+)+)-full\.nupkg\s+\d+\s*$")
+
+
+def _claude_squirrel_base() -> Path:
+    """Carpeta de la instalación por usuario (Setup.exe de Squirrel)."""
+    return _local_appdata() / "AnthropicClaude"
+
+
+def claude_squirrel_install() -> tuple[str | None, Path | None]:
+    """(versión, carpeta app-X) de la instalación por usuario más reciente.
+
+    Se exige `claude.exe` dentro: una carpeta vacía, residuo de una
+    desinstalación, no cuenta como instalada.
+    """
+    best: tuple[str, Path] | None = None
+    try:
+        dirs = sorted(_claude_squirrel_base().glob("app-*"))
+    except OSError:
+        dirs = []
+    for d in dirs:
+        if not (d.is_dir() and (d / "claude.exe").is_file()):
+            continue
+        ver = d.name[len("app-"):]
+        if best is None or _version_tuple(ver) > _version_tuple(best[0]):
+            best = (ver, d)
+    return best if best else (None, None)
+
+
 def detect_claude() -> tuple[bool, str | None, Path | None]:
-    """Busca Claude Desktop: paquete MSIX (actual) o instalación clásica."""
+    """Busca Claude Desktop: paquete MSIX, instalación por usuario o clásica.
+
+    Si hay varias devuelve la de versión más alta.
+    """
+    cands: list[tuple[tuple[int, ...], str | None, Path | None]] = []
     if IS_WIN:
         rc, out, _ = _ps(
             "$p = Get-AppxPackage -Name '*Claude*' -ErrorAction SilentlyContinue | "
@@ -699,21 +809,197 @@ def detect_claude() -> tuple[bool, str | None, Path | None]:
         for ln in out.splitlines():
             if ln.startswith("MSIX|"):
                 _, ver, loc = (ln.strip().split("|", 2) + ["", ""])[:3]
-                return True, ver or None, Path(loc) if loc else None
+                cands.append((_version_tuple(ver), ver or None,
+                              Path(loc) if loc else None))
+    sq_ver, _ = claude_squirrel_install()
+    if sq_ver:
+        cands.append((_version_tuple(sq_ver), sq_ver, _claude_squirrel_base()))
     local = _local_appdata()
-    for base in (local / "AnthropicClaude", local / "Programs" / "claude",
-                 local / "Programs" / "Claude"):
-        if not base.exists():
+    for base in (local / "Programs" / "claude", local / "Programs" / "Claude"):
+        try:
+            if base.is_dir() and (any(base.glob("Claude.exe"))
+                                  or any(base.glob("*/Claude.exe"))):
+                versions = sorted(
+                    (p.name[len("app-"):] for p in base.glob("app-*") if p.is_dir()),
+                    key=_version_tuple, reverse=True)
+                ver = versions[0] if versions else None
+                cands.append((_version_tuple(ver), ver, base))
+        except OSError:
             continue
-        # Los builds clásicos se despliegan en carpetas app-<version>.
-        versions = sorted(
-            (p.name[len("app-"):] for p in base.glob("app-*") if p.is_dir()),
-            key=_version_tuple, reverse=True)
-        ver = versions[0] if versions else None
-        has_exe = (base / "Claude.exe").exists() or any(base.glob("*/Claude.exe"))
-        if ver or has_exe:
-            return True, ver, base
-    return False, None, None
+    if not cands:
+        return False, None, None
+    cands.sort(key=lambda c: c[0], reverse=True)
+    return True, cands[0][1], cands[0][2]
+
+
+def parse_claude_feed(text: str) -> str | None:
+    """Versión más alta publicada en el archivo RELEASES del canal oficial."""
+    best: str | None = None
+    for ln in text.lstrip("\ufeff").splitlines():
+        m = CLAUDE_FEED_RE.match(ln.lstrip("\ufeff"))
+        if m and (best is None or _version_tuple(m.group(1)) > _version_tuple(best)):
+            best = m.group(1)
+    return best
+
+
+def claude_latest_version() -> str | None:
+    """Última versión estable de Claude Desktop según el canal oficial.
+
+    Es el mismo archivo RELEASES que consulta la aplicación para actualizarse.
+    None si no se pudo leer (sin red, proxy…).
+    """
+    try:
+        raw = _http_get(manifest.CLAUDE_RELEASES_FEED, timeout=30, tries=3)
+    except DownloadError:
+        return None
+    return parse_claude_feed(_decode(raw))
+
+
+def claude_setup_url_from_redirect(location: str) -> str | None:
+    """Del destino del redirect MSIX documentado al Setup.exe de esa versión.
+
+    Anthropic publica ambos con el mismo nombre (hash incluido) y distinta
+    extensión. Se acepta solo https en downloads.claude.ai.
+    """
+    from urllib.parse import urlparse
+    u = urlparse(location or "")
+    if u.scheme != "https" or u.hostname != manifest.CLAUDE_DOWNLOAD_HOST:
+        return None
+    if not u.path.lower().endswith(".msix"):
+        return None
+    return u._replace(path=u.path[:-len(".msix")] + ".exe").geturl()
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401
+        return None
+
+
+def resolve_claude_setup_url() -> str | None:
+    """URL oficial del Setup.exe vigente (sin seguir la redirección)."""
+    opener = urllib.request.build_opener(_NoRedirect)
+    for attempt in (1, 2, 3):
+        req = urllib.request.Request(
+            manifest.CLAUDE_MSIX_REDIRECT,
+            headers={"User-Agent": f"qgis-mcp-etl/{__version__}"})
+        try:
+            with opener.open(req, timeout=30):
+                return None  # respondió 200 en vez de redirigir: no es lo esperado
+        except urllib.error.HTTPError as exc:
+            if exc.code in (301, 302, 303, 307, 308):
+                return claude_setup_url_from_redirect(exc.headers.get("Location", ""))
+            if 400 <= exc.code < 500 and exc.code not in (408, 429):
+                return None
+        except (urllib.error.URLError, OSError):
+            pass
+        if attempt < 3:
+            time.sleep(2 * attempt)
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QGIS: instalaciones, versión real y resolución del último parche 3.44
+# ─────────────────────────────────────────────────────────────────────────────
+
+QGIS_PROCESS_RE = re.compile(r"^QGIS\s+(\d+\.\d+\.\d+)", re.MULTILINE)
+QGIS_DB_RE = re.compile(
+    r"^qgis(?:-ltr)?\s+qgis(?:-ltr)?-(\d+\.\d+\.\d+)-\d+\.tar", re.MULTILINE)
+_QGIS_VER_CACHE: dict[str, str | None] = {}
+
+
+def qgis_in_series(version: str | None) -> bool:
+    """True si la versión pertenece a la serie garantizada (3.44.x)."""
+    return _version_tuple(version)[:2] == manifest.QGIS_SERIES
+
+
+def _qgis_version_from_binary(root: Path) -> str | None:
+    """Pregunta la versión al propio QGIS (`qgis_process --version`)."""
+    if not IS_WIN:
+        return None
+    try:
+        bats = sorted((root / "bin").glob("qgis_process*.bat"))
+    except OSError:
+        return None
+    for bat in bats:
+        try:
+            out = subprocess.run([str(bat), "--version"], capture_output=True,
+                                 timeout=180, stdin=subprocess.DEVNULL,
+                                 cwd=str(root / "bin"))
+        except (OSError, subprocess.SubprocessError):
+            continue
+        m = QGIS_PROCESS_RE.search(_decode(out.stdout))
+        if m:
+            return m.group(1)
+    return None
+
+
+def _qgis_version_from_db(root: Path) -> str | None:
+    """Versión del paquete según la base de OSGeo4W (etc/setup/installed.db)."""
+    try:
+        text = (root / "etc" / "setup" / "installed.db").read_text(
+            encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    m = QGIS_DB_RE.search(text)
+    return m.group(1) if m else None
+
+
+def read_qgis_version(root: Path, fresh: bool = False) -> str | None:
+    """Versión de QGIS instalada en `root`, leída del binario cuando se puede.
+
+    Orden: el ejecutable (`qgis_process --version`) → la base de paquetes de
+    OSGeo4W → el nombre de la carpeta («QGIS 3.44.15»).
+    """
+    key = str(root).lower()
+    if not fresh and key in _QGIS_VER_CACHE:
+        return _QGIS_VER_CACHE[key]
+    ver = _qgis_version_from_binary(root) or _qgis_version_from_db(root)
+    if not ver:
+        m = re.search(r"QGIS\s+(\d+\.\d+\.\d+)", root.name)
+        ver = m.group(1) if m else None
+    _QGIS_VER_CACHE[key] = ver
+    return ver
+
+
+def parse_osgeo4w_ini(text: str, package: str) -> str | None:
+    """Versión vigente de `package` en un setup.ini de OSGeo4W (ej. 3.44.15-1)."""
+    for block in re.split(r"(?m)^@ ", text):
+        head, _, body = block.partition("\n")
+        if head.strip() != package:
+            continue
+        for line in body.splitlines():
+            if line.startswith("["):  # [prev], [test]: versiones que no son la vigente
+                break
+            if line.startswith("version:"):
+                return line.split(":", 1)[1].strip()
+    return None
+
+
+def osgeo4w_ltr_version() -> str | None:
+    """Versión que sirve hoy el paquete `qgis-ltr` del repositorio OSGeo4W."""
+    try:
+        raw = _http_get(manifest.OSGEO4W_SETUP_INI, timeout=60, tries=3)
+        text = bz2.decompress(raw).decode("utf-8", errors="replace")
+    except (DownloadError, OSError, ValueError):
+        return None
+    return parse_osgeo4w_ini(text, manifest.OSGEO4W_LTR_PACKAGE)
+
+
+def latest_msi_in_index(html: str) -> tuple[str, str] | None:
+    """(versión, build) del MSI más nuevo de la serie 3.44 en el índice de qgis.org."""
+    found = {(v, b) for v, b in re.findall(manifest.QGIS_MSI_NAME_RE, html)
+             if qgis_in_series(v)}
+    if not found:
+        return None
+    return max(found, key=lambda vb: (_version_tuple(vb[0]), int(vb[1])))
+
+
+def resolve_qgis_msi() -> tuple[str, str] | None:
+    try:
+        raw = _http_get(manifest.QGIS_DOWNLOADS_INDEX, timeout=60, tries=3)
+    except DownloadError:
+        return None
+    return latest_msi_in_index(_decode(raw))
 
 
 def _has_qgis_binary(root: Path) -> bool:
@@ -728,12 +1014,14 @@ def _has_qgis_binary(root: Path) -> bool:
         return False
 
 
-def detect_qgis(extra_roots: tuple[Path, ...] = ()) -> tuple[bool, str | None, Path | None]:
-    """Busca una instalación de QGIS y su versión (la más reciente).
+def find_qgis_installs(extra_roots: tuple[Path, ...] = ()
+                       ) -> list[tuple[tuple[int, ...], str | None, Path]]:
+    """Todas las instalaciones de QGIS con ejecutable, de mayor a menor versión.
 
-    Cubre las instalaciones a nivel máquina (Program Files, OSGeo4W en la raíz
-    de un disco) y las de nivel usuario (OSGeo4W en el home o en la raíz elegida
-    por el usuario, que es donde instala el paso 2 en modo sin-administrador).
+    Cubre las de nivel máquina (Program Files, OSGeo4W en la raíz de un disco) y
+    las de nivel usuario (OSGeo4W en el home o en la raíz elegida por el usuario,
+    que es donde instala el paso 2 en modo sin-administrador). La versión se lee
+    del binario, no del nombre de la carpeta.
     """
     roots: list[Path] = []
     for var in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"):
@@ -743,24 +1031,47 @@ def detect_qgis(extra_roots: tuple[Path, ...] = ()) -> tuple[bool, str | None, P
     roots += [Path(r"C:\Program Files"), Path(r"C:\Program Files (x86)")]
     found: list[tuple[tuple[int, ...], str | None, Path]] = []
     seen: set[str] = set()
+    candidates: list[Path] = []
     for root in roots:
         key = str(root).lower()
         if key in seen or not root.is_dir():
             continue
         seen.add(key)
-        for d in root.glob("QGIS*"):
-            if _has_qgis_binary(d):
-                ver = d.name[4:].strip() or None
-                found.append((_version_tuple(ver), ver, d))
-    if found:
-        found.sort(key=lambda t: t[0], reverse=True)
-        return True, found[0][1], found[0][2]
+        candidates += [d for d in root.glob("QGIS*")]
     o4w_roots = [*extra_roots, Path.home() / "OSGeo4W"]
     for drive in ("C", "D", "E"):
         o4w_roots += [Path(f"{drive}:\\OSGeo4W"), Path(f"{drive}:\\OSGeo4W64")]
-    for p in o4w_roots:
-        if _has_qgis_binary(p):
-            return True, None, p
+    candidates += o4w_roots
+    done: set[str] = set()
+    for d in candidates:
+        key = str(d).lower()
+        if key in done or not _has_qgis_binary(d):
+            continue
+        done.add(key)
+        ver = read_qgis_version(d)
+        found.append((_version_tuple(ver), ver, d))
+    found.sort(key=lambda t: t[0], reverse=True)
+    return found
+
+
+def detect_qgis(extra_roots: tuple[Path, ...] = ()) -> tuple[bool, str | None, Path | None]:
+    """El QGIS más reciente que haya, de cualquier serie."""
+    found = find_qgis_installs(extra_roots)
+    if found:
+        return True, found[0][1], found[0][2]
+    return False, None, None
+
+
+def detect_qgis_ltr(extra_roots: tuple[Path, ...] = ()) -> tuple[bool, str | None, Path | None]:
+    """El QGIS 3.44.x más reciente (la serie LTR que garantiza este instalador).
+
+    Un QGIS de otra serie (3.40, 4.x…) NO cuenta: este instalador existe para
+    dejar la 3.44 LTR, y darla por buena con otra versión sería reportar éxito
+    sobre algo que no es lo pedido.
+    """
+    for _, ver, path in find_qgis_installs(extra_roots):
+        if qgis_in_series(ver):
+            return True, ver, path
     return False, None, None
 
 
@@ -962,64 +1273,105 @@ def step1_claude_desktop(cfg: Config, log: Logger) -> bool:
     log.step(1, T("s1.title"))
     has, ver = confirm_installed("Claude Desktop", "claude", detect_claude(), cfg, log)
     if has:
+        ver = _claude_refresh(cfg, log, ver)
         cfg.status[1] = T("st.present", v=f" (v{ver})" if ver else "")
         log.ok(T("s1.existing_ok", v=f" (v{ver})" if ver else ""))
         return True
 
-    if not cfg.dry_run:
-        # Si %APPDATA%\Claude existe ANTES de instalar, la versión MSIX usa esa
-        # carpeta en vez de una copia virtualizada; es donde escribe el paso 6.
-        (_appdata() / "Claude").mkdir(parents=True, exist_ok=True)
-
-    # El paquete MSIX de Claude registra un servicio de Windows y por eso solo
-    # se puede instalar con administrador (sin él: error 0x80073D28). Sin
-    # permisos no tiene sentido descargar 285 MB: se va directo a la guía manual
-    # (el instalador normal de claude.com/download sí funciona sin administrador).
-    if not _is_admin():
-        log.info(T("s1.noadmin"))
-        if cfg.dry_run:
-            log.info(T("s1.dry_manual", url=manifest.CLAUDE_DOWNLOAD_PAGE))
-            return True
-        return _claude_manual(cfg, log)
-
-    package = None
-    try:
-        package = fetch_verified(manifest.CLAUDE_DESKTOP, cfg, log)
-    except DownloadError as exc:
-        log.warn(str(exc))
     if cfg.dry_run:
-        log.info(T("s1.dry"))
+        log.info(T("s1.dry", url=manifest.CLAUDE_MSIX_REDIRECT,
+                   feed=manifest.CLAUDE_RELEASES_FEED))
         return True
 
-    if package is not None and _install_claude_msix(package, log):
-        cfg.status[1] = T("st.installed")
-        log.ok(T("s1.ok"))
+    # Instalación por usuario con el Setup.exe oficial: no pide administrador
+    # (el MSIX sí lo pide: registra un servicio y sin él falla con 0x80073D28).
+    if _install_claude_user(cfg, log):
         return True
     return _claude_manual(cfg, log)
 
 
-def _install_claude_msix(package: Path, log: Logger) -> bool:
-    """Instala el MSIX oficial con los comandos que documenta Anthropic
-    (support.claude.com/en/articles/12622703): primero para todo el equipo
-    y, si eso no aplica, para el usuario actual."""
+def _verify_claude_binary(cfg: Config, log: Logger) -> bool:
+    """El claude.exe instalado existe, declara su versión y está firmado por Anthropic."""
+    ver, folder = claude_squirrel_install()
+    if folder is None:
+        return False
+    exe = folder / "claude.exe"
+    log.info(T("s1.binver", v=_file_version(exe) or ver, path=exe))
+    return verify_signature(exe, manifest.CLAUDE_PUBLISHER, log, cfg.skip_signature)
+
+
+def _claude_update(cfg: Config, log: Logger, latest: str) -> bool:
+    """Lleva la instalación por usuario al canal oficial con su propio Update.exe."""
+    upd = _claude_squirrel_base() / "Update.exe"
+    if not upd.is_file():
+        return False
+    if not verify_signature(upd, manifest.CLAUDE_PUBLISHER, log, cfg.skip_signature):
+        return False
+    log.info(T("s1.updating", v=latest))
+    run_to_file([upd, "--update", manifest.CLAUDE_RELEASES_BASE], log, timeout=1800)
+    ver, _ = claude_squirrel_install()
+    return ver is not None and _version_tuple(ver) >= _version_tuple(latest)
+
+
+def _claude_refresh(cfg: Config, log: Logger, ver: str | None) -> str | None:
+    """Con Claude ya instalado: compara con el canal oficial y actualiza si toca."""
+    if cfg.dry_run or not detect_claude()[0]:
+        return ver
+    latest = claude_latest_version()
+    if latest is None:
+        log.warn(T("s1.nofeed"))
+        return ver
+    cur = detect_claude()[1] or ver
+    if _version_tuple(cur) >= _version_tuple(latest):
+        log.ok(T("s1.is_latest", v=cur))
+        return cur
+    sq_ver, _ = claude_squirrel_install()
+    if sq_ver and _claude_update(cfg, log, latest):
+        new = claude_squirrel_install()[0]
+        log.ok(T("s1.is_latest", v=new))
+        return new
+    # MSIX u otra instalación: sin administrador no se puede actualizar desde aquí.
+    log.warn(T("s1.outdated", v=cur, latest=latest))
+    return cur
+
+
+def _install_claude_user(cfg: Config, log: Logger) -> bool:
+    """Instala Claude Desktop por usuario y lo deja en la última versión del canal."""
+    latest = claude_latest_version()
+    if latest is None:
+        log.warn(T("s1.nofeed"))
+    url = resolve_claude_setup_url()
+    if not url:
+        log.warn(T("s1.nourl"))
+        return False
+    from urllib.parse import urlparse
+    name = Path(urlparse(url).path).name
+    dl = dataclasses.replace(manifest.CLAUDE_SETUP, url=url,
+                             filename=name or manifest.CLAUDE_SETUP.filename)
+    try:
+        setup = fetch_verified(dl, cfg, log)
+    except DownloadError as exc:
+        log.warn(str(exc))
+        return False
+    if setup is None:
+        return False
     log.info(T("s1.running"))
-    env = {"QMI_PKG": str(package), "QMI_FAM": manifest.CLAUDE_MSIX_FAMILY}
-    rc, out, err = _ps(
-        "Add-AppxProvisionedPackage -Online -PackagePath $env:QMI_PKG "
-        "-SkipLicense -Regions 'all' -ErrorAction Stop | Out-Null; "
-        "Add-AppxPackage -RegisterByFamilyName -MainPackage $env:QMI_FAM "
-        "-ErrorAction SilentlyContinue", env, timeout=1800)
-    log.file(f"  Add-AppxProvisionedPackage rc={rc}\n{out}{err}")
-    if not detect_claude()[0]:
-        rc, out, err = _ps("Add-AppxPackage -Path $env:QMI_PKG -ErrorAction Stop",
-                           env, timeout=1800)
-        log.file(f"  Add-AppxPackage rc={rc}\n{out}{err}")
-    if detect_claude()[0]:
-        return True
-    reason = " ".join(ln.strip() for ln in err.splitlines()[:3] if ln.strip()) \
-        or f"rc={rc}"
-    log.warn(T("s1.autofail", reason=reason[:400]))
-    return False
+    rc = run_to_file([setup, "--silent"], log, timeout=900)
+    ver, _ = claude_squirrel_install()
+    if ver is None:
+        log.warn(T("s1.autofail", reason=f"rc={rc}"))
+        return False
+    if latest and _version_tuple(ver) < _version_tuple(latest):
+        if _claude_update(cfg, log, latest):
+            ver = claude_squirrel_install()[0] or ver
+        else:
+            log.warn(T("s1.update_fail", v=ver, latest=latest))
+            cfg.warnings.append(T("w.claude_update", v=ver, latest=latest))
+    if not _verify_claude_binary(cfg, log):
+        return False
+    cfg.status[1] = T("st.claude_installed", v=ver)
+    log.ok(T("s1.ok", v=ver))
+    return True
 
 
 def _claude_manual(cfg: Config, log: Logger) -> bool:
@@ -1035,7 +1387,7 @@ def _claude_manual(cfg: Config, log: Logger) -> bool:
         _ask(T("s1.manual_wait"))
         if detect_claude()[0]:
             cfg.status[1] = T("st.installed_manual")
-            log.ok(T("s1.ok"))
+            log.ok(T("s1.ok", v=detect_claude()[1] or "?"))
             return True
     cfg.status[1] = T("st.manual_pending")
     cfg.pending.add(1)
@@ -1044,14 +1396,23 @@ def _claude_manual(cfg: Config, log: Logger) -> bool:
 
 
 def step2_qgis(cfg: Config, log: Logger) -> bool:
-    log.step(2, T("s2.title", v=manifest.QGIS_VERSION))
-    has, ver = confirm_installed(
-        "QGIS", "qgis", detect_qgis((cfg.user_qgis_root,)), cfg, log)
+    log.step(2, T("s2.title", v=manifest.QGIS_SERIES_TEXT))
+    detected = detect_qgis_ltr((cfg.user_qgis_root,))
+    if not detected[0]:
+        other = detect_qgis((cfg.user_qgis_root,))
+        if other[0]:
+            log.info(T("s2.other_series", v=other[1] or "?",
+                       series=manifest.QGIS_SERIES_TEXT))
+    has, ver = confirm_installed("QGIS", "qgis", detected, cfg, log)
+    if has and ver and not qgis_in_series(ver):
+        log.warn(T("s2.not_series", v=ver, series=manifest.QGIS_SERIES_TEXT))
+        has = False
     if has:
+        if not ver:
+            log.warn(T("s2.unverified"))
+        ver = _maybe_upgrade_qgis(cfg, log, ver, detected[2])
         cfg.qgis_version = ver
         cfg.status[2] = T("st.present", v=f" (v{ver})" if ver else "")
-        if _version_tuple(ver) and _version_tuple(ver) < (3, 28):
-            log.warn(T("s2.old", v=ver))
         log.ok(T("s2.existing_ok", v=f" (v{ver})" if ver else ""))
         return True
 
@@ -1079,16 +1440,80 @@ def step2_qgis(cfg: Config, log: Logger) -> bool:
         except OSError:
             pass
 
-    ok = _install_qgis_msi(cfg, log) if mode == "msi" else _install_qgis_user(cfg, log)
-    if ok:
-        cfg.qgis_version = manifest.QGIS_VERSION
-    return ok
+    return _install_qgis_msi(cfg, log) if mode == "msi" else _install_qgis_user(cfg, log)
+
+
+def _maybe_upgrade_qgis(cfg: Config, log: Logger, ver: str | None,
+                        root: Path | None) -> str | None:
+    """Con un 3.44.x ya instalado: avisa si hay un parche más nuevo y, si la
+    instalación es la propia (OSGeo4W de usuario), la actualiza."""
+    if cfg.dry_run or not ver:
+        return ver
+    pkg = osgeo4w_ltr_version()
+    if not pkg or not qgis_in_series(pkg):
+        return ver
+    latest = pkg.split("-")[0]  # «3.44.15-1» -> 3.44.15 (el -1 es el build del paquete)
+    if _version_tuple(ver) >= _version_tuple(latest):
+        log.ok(T("s2.latest_ok", v=ver))
+        return ver
+    own = False
+    try:
+        own = root is not None and root.resolve() == cfg.user_qgis_root.resolve()
+    except OSError:
+        pass
+    if not own:
+        log.warn(T("s2.patch_available", v=ver, latest=latest))
+        return ver
+    if qgis_running():
+        log.warn(T("s2.running_skip", v=ver, latest=latest))
+        return ver
+    log.info(T("s2.upgrading", v=ver, latest=latest))
+    if _install_qgis_user(cfg, log):
+        return cfg.qgis_version
+    log.warn(T("s2.patch_available", v=ver, latest=latest))
+    return ver
+
+
+def _qgis_version_for_profiles(cfg: Config) -> str | None:
+    """Versión de QGIS que decide en qué carpeta de perfil (QGIS3/QGIS4) se
+    despliega el plugin: la 3.44 si existe; si no, la más reciente que haya."""
+    for finder in (detect_qgis_ltr, detect_qgis):
+        found, ver, _ = finder((cfg.user_qgis_root,))
+        if found:
+            return ver
+    return None
+
+
+def _confirm_series(cfg: Config, log: Logger, ver: str | None, root: Path) -> bool:
+    """Tras instalar: la versión leída del binario tiene que ser 3.44.x."""
+    if ver is None:
+        log.err(T("qv.unreadable", root=root))
+        return False
+    if not qgis_in_series(ver):
+        log.err(T("qv.wrong", v=ver, series=manifest.QGIS_SERIES_TEXT))
+        return False
+    cfg.qgis_version = ver
+    log.ok(T("qv.ok", v=ver, series=manifest.QGIS_SERIES_TEXT))
+    return True
 
 
 def _install_qgis_msi(cfg: Config, log: Logger) -> bool:
     """Vía clásica: MSI oficial de QGIS (requiere administrador/UAC)."""
+    version, build = manifest.QGIS_VERSION, manifest.QGIS_BUILD
+    if not cfg.dry_run:
+        resolved = resolve_qgis_msi()
+        if resolved:
+            version, build = resolved
+            log.info(T("msi.resolved", v=version, b=build))
+        else:
+            log.warn(T("msi.noindex", v=version, b=build))
+    dl = dataclasses.replace(
+        manifest.QGIS_LTR,
+        name=f"QGIS {version} LTR (OSGeo4W MSI)",
+        url=manifest.QGIS_MSI_URL_TEMPLATE.format(version=version, build=build),
+        filename=f"QGIS-OSGeo4W-{version}-{build}.msi")
     try:
-        installer = fetch_verified(manifest.QGIS_LTR, cfg, log)
+        installer = fetch_verified(dl, cfg, log)
     except DownloadError as exc:
         log.err(str(exc))
         return False
@@ -1096,19 +1521,27 @@ def _install_qgis_msi(cfg: Config, log: Logger) -> bool:
         return False
     if cfg.dry_run:
         log.info(T("msi.dry"))
+        log.info(T("qv.dry", series=manifest.QGIS_SERIES_TEXT))
         return True
     log.info(T("msi.installing"))
     msi_log = cfg.logs_dir / "qgis-msi.log"
     rc = run([str(_sysroot() / "System32" / "msiexec.exe"), "/i", installer,
               "/qb", "/norestart", "/l*v", msi_log], log)
-    if rc in (0, 3010):  # 3010 = éxito, requiere reinicio
-        cfg.status[2] = T("st.installed_msi")
-        log.ok(T("msi.ok"))
-        return True
-    log.err(T("msi.err", rc=rc, log=msi_log))
-    if rc in (1602, 1603, 1625, 1730):
-        log.warn(T("msi.perm_hint"))
-    return False
+    if rc not in (0, 3010):  # 3010 = éxito, requiere reinicio
+        log.err(T("msi.err", rc=rc, log=msi_log))
+        if rc in (1602, 1603, 1625, 1730):
+            log.warn(T("msi.perm_hint"))
+        return False
+    _QGIS_VER_CACHE.clear()
+    found, ver, path = detect_qgis_ltr()
+    if not found or path is None:
+        log.err(T("qv.unreadable", root=os.environ.get("ProgramFiles", "")))
+        return False
+    if not _confirm_series(cfg, log, ver, path):
+        return False
+    cfg.status[2] = T("st.installed_msi", v=ver)
+    log.ok(T("msi.ok"))
+    return True
 
 
 def _install_qgis_user(cfg: Config, log: Logger) -> bool:
@@ -1148,8 +1581,19 @@ def _install_qgis_user(cfg: Config, log: Logger) -> bool:
     ]
     if cfg.dry_run:
         log.info(T("o4w.dry", root=root))
+        log.info(T("qv.dry", series=manifest.QGIS_SERIES_TEXT))
         log.info("  " + subprocess.list2cmdline(cmd))
         return True
+    # El repositorio sirve «el último» qgis-ltr; si algún día ese paquete pasa a
+    # otra serie (3.48, 4.x), instalarlo dejaría algo que no es lo pedido.
+    pkg = osgeo4w_ltr_version()
+    if pkg is None:
+        log.warn(T("o4w.noindex"))
+    elif not qgis_in_series(pkg):
+        log.err(T("o4w.series_changed", v=pkg, series=manifest.QGIS_SERIES_TEXT))
+        return False
+    else:
+        log.info(T("o4w.resolved", v=pkg))
     log.info(T("o4w.installing", root=root))
     log.info(T("o4w.big"))
     root.mkdir(parents=True, exist_ok=True)
@@ -1163,7 +1607,11 @@ def _install_qgis_user(cfg: Config, log: Logger) -> bool:
     qgis_bin = next((root / "bin").glob("qgis*-bin.exe"), None) \
         if (root / "bin").exists() else None
     if rc == 0 and qgis_bin is not None:
-        cfg.status[2] = T("st.installed_user", root=root)
+        _QGIS_VER_CACHE.clear()
+        ver = read_qgis_version(root, fresh=True)
+        if not _confirm_series(cfg, log, ver, root):
+            return False
+        cfg.status[2] = T("st.installed_user", root=root, v=ver)
         log.ok(T("o4w.ok", root=root, bin=qgis_bin.name))
         log.info(T("o4w.open", bat=root / "bin" / "qgis-ltr.bat"))
         return True
@@ -1394,8 +1842,7 @@ def step5_configure_qgis(cfg: Config, log: Logger) -> bool:
     targets = cfg.qgis_targets() if cfg.qgis_version or cfg.dry_run else None
     if targets is None:
         # El paso 2 no corrió en esta ejecución: se detecta QGIS aquí.
-        _, ver, _ = detect_qgis((cfg.user_qgis_root,))
-        cfg.qgis_version = ver
+        cfg.qgis_version = _qgis_version_for_profiles(cfg)
         targets = cfg.qgis_targets()
 
     if cfg.dry_run:
@@ -1655,6 +2102,47 @@ def _qgis_port_open(port: int = 9876) -> bool:
         return False
 
 
+def _verify_qgis_series(cfg: Config, log: Logger) -> bool:
+    found, ver, path = detect_qgis_ltr((cfg.user_qgis_root,))
+    if found:
+        cfg.qgis_version = ver
+        log.ok(T("s7.qgis_ok", v=ver, series=manifest.QGIS_SERIES_TEXT, path=path))
+        return True
+    other = detect_qgis((cfg.user_qgis_root,))
+    if other[0]:
+        log.err(T("s7.qgis_wrong", v=other[1] or "?", series=manifest.QGIS_SERIES_TEXT))
+        return False
+    if "qgis" in cfg.assume_installed:
+        log.warn(T("s7.qgis_assumed"))
+        return True
+    log.err(T("s7.qgis_missing", series=manifest.QGIS_SERIES_TEXT))
+    return False
+
+
+def _verify_claude(cfg: Config, log: Logger) -> bool:
+    found, ver, loc = detect_claude()
+    if not found:
+        log.warn(T("s7.claude_missing"))  # el pendiente ya consta en el resumen
+        return True
+    ok = True
+    sq_ver, folder = claude_squirrel_install()
+    if folder is not None and sq_ver == ver:
+        exe = folder / "claude.exe"
+        if verify_signature(exe, manifest.CLAUDE_PUBLISHER, log, cfg.skip_signature):
+            log.ok(T("s7.claude_ok", v=_file_version(exe) or ver, loc=loc))
+        else:
+            log.err(T("s7.claude_sig_bad", path=exe))
+            ok = False
+    else:
+        log.ok(T("s7.claude_ok", v=ver or "?", loc=loc))
+    latest = claude_latest_version()
+    if latest and ver and _version_tuple(ver) < _version_tuple(latest):
+        log.warn(T("s7.claude_old", v=ver, latest=latest))
+    elif latest:
+        log.ok(T("s7.claude_latest", v=latest))
+    return ok
+
+
 def step7_verify(cfg: Config, log: Logger) -> bool:
     log.step(7, T("s7.title"))
     if cfg.dry_run:
@@ -1662,9 +2150,14 @@ def step7_verify(cfg: Config, log: Logger) -> bool:
         return True
     ok = True
 
+    # 0) Lo instalado es lo pedido: QGIS 3.44.x (versión leída del binario) y
+    #    Claude Desktop de Anthropic. Una serie distinta NO se da por buena.
+    ok = _verify_qgis_series(cfg, log) and ok
+    ok = _verify_claude(cfg, log) and ok
+
     # 1) Plugin desplegado y habilitado en cada perfil de destino.
     if not cfg.qgis_version:
-        _, cfg.qgis_version, _ = detect_qgis((cfg.user_qgis_root,))
+        cfg.qgis_version = _qgis_version_for_profiles(cfg)
     for major, profile in cfg.qgis_targets():
         plugin = profile / "python" / "plugins" / manifest.PLUGIN_DIRNAME
         ini = profile / "QGIS" / f"QGIS{major}.ini"
@@ -1747,7 +2240,7 @@ def uninstall(cfg: Config, log: Logger) -> bool:
     decide la persona (se le indica la ruta).
     """
     log.line("\n" + T("un.title"))
-    _, cfg.qgis_version, _ = detect_qgis((cfg.user_qgis_root,))
+    cfg.qgis_version = _qgis_version_for_profiles(cfg)
     for major, profile in cfg.qgis_targets():
         plugin = profile / "python" / "plugins" / manifest.PLUGIN_DIRNAME
         if cfg.dry_run:

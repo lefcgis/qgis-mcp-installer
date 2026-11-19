@@ -1,5 +1,73 @@
 # Cambios
 
+## 2.1.0 — 2026-11-18
+
+Corrección pedida tras la 2.0.0: el instalador tiene que dejar instalada **la
+última versión estable de Claude Desktop** y **QGIS 3.44 LTR**, y no dar por
+bueno nada que no lo sea.
+
+### Errores corregidos
+
+- **Claude Desktop (paso 1) no quedaba instalado sin administrador.** Causa
+  exacta: el instalador descargaba el paquete **MSIX** y lo registraba con
+  `Add-AppxPackage`. Ese paquete declara un servicio de Windows, y registrar un
+  paquete con servicio exige elevación: sin ella Windows lo rechaza con
+  `0x80073D28` («Administrator privileges required to install packaged
+  service»; registro `Microsoft-Windows-AppXDeploymentServer/Operational`,
+  eventos 404 y 605 «Failure in the Approved state handler», con el instalador
+  de la 2.0.0 el 2026-11-18 17:33). No es política, ni sideloading, ni firma, ni
+  dependencia faltante: es el requisito del propio paquete. Por eso la 2.0.0
+  caía a una guía manual (código de salida 2).
+  Ahora usa el instalador **por usuario** de Anthropic (`Setup.exe`, Squirrel,
+  firmado por «Anthropic, PBC»), que instala en `%LOCALAPPDATA%\AnthropicClaude`
+  **sin administrador**.
+- **El redirect «MSIX latest» no es la última versión.** El 2026-11-18 servía la
+  5.11492.5 mientras el canal oficial de actualizaciones (`RELEASES`, el mismo
+  que consulta la aplicación) ya publicaba la 6.6395.1. El instalador consulta
+  ese canal, instala y luego ejecuta `Update.exe --update` contra él, y exige
+  que la versión instalada sea la del canal. Si no lo logra, queda instalado
+  pero lo dice como advertencia (código 2), no como éxito.
+- **QGIS: la versión estaba fijada a mano (3.44.15-2) y nada comprobaba lo que
+  quedaba instalado.** Con `qgis-ltr` en OSGeo4W, el día que el paquete pase a
+  otra serie el instalador habría dejado esa serie y reportado «QGIS LTR
+  instalado». Ahora:
+  - Con administrador, el MSI se resuelve leyendo el índice de `qgis.org` y se
+    toma el último `3.44.x` (en orden numérico: 3.44.10 > 3.44.9). Si el índice
+    no responde, usa la última versión verificada.
+  - Sin administrador, antes de instalar se lee `setup.ini` de OSGeo4W: si
+    `qgis-ltr` ya no es 3.44.x, **no instala** y lo explica.
+  - Tras instalar se lee la **versión del propio binario** (`qgis_process
+    --version`; respaldo: la base de paquetes de OSGeo4W). Si no es 3.44.x, el
+    paso 2 falla.
+  - La detección ya no mira el nombre de la carpeta: lee la versión del binario,
+    y un QGIS de otra serie (3.40, 4.x) **no cuenta** como instalado: se instala
+    la 3.44 aparte.
+  - Si hay un parche nuevo de 3.44 y la instalación es la propia (OSGeo4W de
+    usuario), la actualiza; si es ajena, avisa.
+- **El paso 7 daba «verificado» sin mirar QGIS ni Claude.** Ahora comprueba que
+  haya un QGIS 3.44.x (leído del binario) y que Claude Desktop, si está, tenga
+  firma válida de Anthropic, e informa si es la última publicada.
+- `Setup.exe` y `Update.exe` de Squirrel pueden dejar procesos hijos con la
+  salida abierta; se ejecutan con la salida a un archivo y un tiempo máximo, para
+  que el instalador no se cuelgue.
+- Un bug propio, hallado por las pruebas nuevas: comparar «3.44.15-1» (versión
+  de paquete OSGeo4W) con `_version_tuple` daba 3.44.151.
+
+### Cambios de comportamiento
+
+- `--steps 3-7` o `--steps 7` en un equipo **sin QGIS 3.44** ahora falla en el
+  paso 7 (antes lo pasaba por alto). Si tu QGIS está en un lugar no estándar,
+  usa `--assume-installed qgis`.
+- El paso 1 ya no intenta `Add-AppxProvisionedPackage` ni `Add-AppxPackage`. Las
+  instalaciones MSIX que ya existan se siguen detectando y configurando.
+- `manifest.py`: `CLAUDE_DESKTOP` (MSIX) pasó a `CLAUDE_SETUP`; nuevas constantes
+  del canal oficial y de la serie de QGIS (`QGIS_SERIES`).
+
+### Pruebas
+
+53 pruebas unitarias (20 nuevas en `tests/test_claude_qgis.py`). Pruebas reales
+y lo que no se pudo probar: `TESTING.md`.
+
 ## 2.0.0 — 2026-11-18
 
 Revisión completa tras reportes de que el instalador «no quedaba al 100 %» en

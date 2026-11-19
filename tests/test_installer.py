@@ -314,7 +314,7 @@ class Manifiesto(unittest.TestCase):
             self.assertTrue(dl.filename, dl.key)
 
     def test_lo_que_se_ejecuta_tiene_firma_o_hash(self):
-        for key in ("claude_desktop", "qgis_ltr", "osgeo4w_setup", "uv"):
+        for key in ("claude_setup", "qgis_ltr", "osgeo4w_setup", "uv"):
             dl = manifest.DOWNLOADS[key]
             self.assertTrue(dl.expected_publisher_contains or dl.sha256, key)
         self.assertRegex(manifest.UV.sha256 or "", r"^[0-9a-f]{64}$")

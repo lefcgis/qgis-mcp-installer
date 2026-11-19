@@ -1,8 +1,8 @@
 # Pruebas
 
-Este documento tiene dos partes: **cómo probar el instalador en un equipo nuevo**
-(lo que hay que hacer) y **qué se probó en la versión 2.0.0** (lo que ya consta,
-y lo que no).
+Este documento tiene tres partes: **cómo probar el instalador en un equipo nuevo**
+(lo que hay que hacer), **qué se probó en la versión 2.1.0** (la vigente) y, como
+historial, **qué se probó en la 2.0.0**.
 
 ## Parte 1 — Probarlo en un equipo nuevo
 
@@ -41,7 +41,7 @@ Estos seis datos explican casi cualquier diferencia entre un equipo y otro.
    | Marca | Significado |
    |---|---|
    | `[✓]` en los 7 pasos + «Instalación completa y verificada» | Todo listo |
-   | `[!]` en el paso 1 | Claude Desktop hay que instalarlo a mano (normal sin administrador). Instálalo desde <https://claude.com/download>; no hace falta repetir el instalador |
+   | `[!]` en el paso 1 | Claude Desktop hay que instalarlo a mano: no hubo internet para `downloads.claude.ai`, o el instalador oficial no dejó la aplicación. Instálalo desde <https://claude.com/download>; no hace falta repetir el instalador. (Desde la 2.1.0 ya **no** depende de ser administrador) |
    | `[✗]` en cualquier paso | Falló. Guarda el log (ruta al final de la pantalla) |
 
 4. **Prueba de uso** (la única que no puede automatizarse):
@@ -65,7 +65,101 @@ qgis-mcp-installer.exe --steps 3-7        :: repetir no debe romper nada
 qgis-mcp-installer.exe --uninstall        :: quita plugin y entrada de Claude
 ```
 
-## Parte 2 — Qué se probó en la versión 2.0.0
+## Parte 2 — Qué se probó en la versión 2.1.0
+
+Equipo de prueba (2026-11-18): el mismo de la 2.0.0 — Windows 11 Pro 10.0.26200,
+cuenta **sin administrador**, **Smart App Control activado**, Python 3.12 del
+usuario. Claude Desktop no estaba instalado (se quitó a propósito). Estas pruebas
+**no** redirigieron `%APPDATA%` ni `%LOCALAPPDATA%`: corrieron sobre el perfil
+real, salvo donde se indica. Todo lo de abajo se ejecutó el 2026-11-18.
+
+### Causa de cada problema (con evidencia)
+
+**Claude Desktop.** El registro `Microsoft-Windows-AppXDeploymentServer/Operational`
+guarda el fallo de la 2.0.0 (17:33): `AppX Deployment operation failed for package
+Claude_5.11492.5.0_x64__pzs8sxrjxfjjc with error 0x80073D28 … Administrator
+privileges required to install packaged service`, más el evento 605 «Failure in
+the Approved state handler». No hay políticas de Appx que lo expliquen (solo
+`MdmHosts` en `HKLM\SOFTWARE\Policies\Microsoft\Windows\Appx`); la firma del MSIX
+era válida. Es un requisito del propio paquete (declara un servicio). Hay otra
+vía oficial: `downloads.claude.ai` publica, con el mismo nombre y hash, el
+`Setup.exe` (Squirrel.Windows, `OriginalFilename: Setup.exe`, firma `Anthropic,
+PBC` válida) que instala por usuario. Además, el redirect «msix/latest» iba
+**detrás**: servía 5.11492.5 (publicada el 2026-11-13) mientras el canal
+`RELEASES` ya listaba `AnthropicClaude-6.6395.1-full.nupkg` (publicado el
+2026-11-18 18:45 UTC). `winget show Anthropic.Claude` marca 4.29.0 (2026-10-27):
+también atrasado, por eso no se usa.
+
+**QGIS.** El 2026-11-18, `setup.ini` de OSGeo4W: `qgis-ltr` 3.44.15-1 (y `qgis`
+a secas 4.2.3-1); índice de `download.qgis.org/downloads/`: el MSI 3.44 más
+nuevo es 3.44.15-2 (`3.44.15-3`, `3.44.16-*` y `3.44.17-1` responden 403). O sea:
+la versión fijada **era correcta hoy**; el defecto era de garantía (nada la
+resolvía ni la comprobaba, y un QGIS 4.x existente se daba por instalado). Esa
+parte no se pudo reproducir como fallo en vivo porque el repositorio hoy sirve
+3.44.15; la lógica nueva se probó con pruebas unitarias y simulaciones (abajo).
+
+### Las cinco pruebas
+
+| # | Prueba | Resultado | Evidencia |
+|---|---|---|---|
+| 1 | 53 pruebas unitarias (20 nuevas) + plan en seco es/pt, forzando «nada instalado», con `--qgis-install user` y `msi` | **Pasa** | `python -m unittest discover -s tests` → `Ran 53 tests … OK`. Planes: código 0, 4 combinaciones (es/pt × user/msi), no se creó ningún archivo (`C:\Users\Lucho\qmi_dry` no existe). El plan MSI resuelve `QGIS-OSGeo4W-3.44.15-2.msi` |
+| 2 | **Paso 1 real** con el código fuente, Claude Desktop sin instalar (quedaba una carpeta residual `app-6.6395.1` sin `claude.exe` de una desinstalación previa, que se ignoró correctamente) | **Pasa**, código 0 | Descarga `…/5.11492.5/Claude-1403e2cf….exe` (254.9 MB), firma válida `CN="Anthropic, PBC"`, instala sin administrador, `Update.exe --update` al canal oficial, `claude.exe` **6.6395.1** firmado (`Valid`), clave `HKCU\…\Uninstall\AnthropicClaude` y acceso `Anthropic\Claude.lnk`. El canal `RELEASES` dice `AnthropicClaude-6.6395.1-full.nupkg` ⇒ es la última publicada (consultado el mismo día) |
+| 3 | **Paso 2 real**, raíz limpia `C:\Users\Lucho\qmi_t3` (OSGeo4W, sin administrador) | **Pasa**, código 0 | Log: «El repositorio OSGeo4W sirve qgis-ltr 3.44.15-1» → «Versión comprobada en el binario: QGIS 3.44.15 (serie 3.44 LTR)». Verificación independiente: `bin\qgis_process-qgis-ltr.bat --version` → `QGIS 3.44.15-Solothurn 'Solothurn' (44b4ef05178)`; `installed.db`: `qgis-ltr qgis-ltr-3.44.15-1`. Tardó ~7 min |
+| 4 | **Instalación completa pasos 1–7** con el `.exe` construido (`python build_exe.py --clean`, 8.1 MB, `qgis-mcp-installer 2.1.0`), Claude quitado antes con `Update.exe --uninstall`, defaults sobre el perfil real; luego **segunda corrida** | **Pasa**: 1.ª corrida código 0, 2.ª corrida código 0 | 1.ª: paso 1 instala Claude 6.6395.1 (mismas líneas de la prueba 2), paso 2 «Detectado QGIS v3.44.15 … es el último parche publicado de la serie 3.44 LTR», paso 7 «Claude Desktop 6.6395.1 … Es la última versión estable publicada» y «El servidor MCP responde: Qgis_mcp 1.30.0, 102 herramientas». 2.ª: pasos 1 y 2 «ya presente», paso 6 «ya estaba al día; no se tocó» |
+| 5 | **`instalar.cmd`** de punta a punta **sin Python en el PATH** (Claude quitado antes) + `--uninstall` + verificación negativa | **Pasa** | Instalación: código 0 (paso 1 instaló Claude 6.6395.1 de nuevo, 7 pasos ✓). `--uninstall`: código 0, plugin borrado, `mcpServers` quedó vacío. `--steps 7`: **código 1** («Falta el plugin…», «Falta la entrada 'qgis'») como debe |
+
+Además, en el equipo real:
+
+- **Claude Desktop real lee la configuración.** Con la configuración de la
+  prueba 4, se abrió `AnthropicClaude\claude.exe` (6.6395.1): lanzó
+  `python.exe -I C:\Users\Lucho\qgis-mcp\env\run_server.py` (proceso hijo de
+  `claude.exe`) y escribió `%LOCALAPPDATA%\Claude\logs\mcp-server-qgis.log` con
+  `ListToolsRequest` atendido por el servidor. La configuración efectiva es
+  `%APPDATA%\Claude\claude_desktop_config.json` (entrada `qgis`); no hay copia
+  virtualizada `Packages\Claude_*` porque no es MSIX. Después se cerró la app.
+- **Una instalación que no es la última se actualiza** (simulado en las pruebas
+  unitarias; en vivo solo el caso «instalar y subir de 5.11492.5 a 6.6395.1»,
+  que es lo que hicieron las pruebas 2, 4 y 5).
+- **Estado final**: ver el informe de la entrega; se repitió el `.exe` completo
+  al final (código 0) porque la prueba 5 desinstaló plugin y entrada MCP.
+
+### Simulado (pruebas unitarias, no en vivo)
+
+- `qgis-ltr` que pasa a otra serie (3.48): el instalador **no instala**.
+- Solo hay QGIS 4.2.3: no cuenta como 3.44, el paso 2 instala la 3.44 aparte y
+  el paso 7 falla si no hay 3.44.
+- 3.44.15 y 4.2.3 a la vez: gana la 3.44.15.
+- Parche viejo (3.44.12) en la instalación propia: se actualiza; en una ajena:
+  solo avisa.
+- Actualización de Claude que «termina» pero no deja la versión nueva: queda
+  instalado, advertencia, código 2.
+- Redirect hacia otro host, `http` o sin `.msix`: se rechaza.
+
+### Lo que NO se probó (y por qué)
+
+- **Un parche 3.44 más nuevo que 3.44.15.** Hoy no existe: no hay forma de
+  ejercitar «subir de parche» en vivo. Solo unitaria.
+- **El MSI con administrador** (`--qgis-install msi`): el equipo no tiene
+  administrador. Se probó su resolución (plan en seco → `3.44.15-2`) y la lógica,
+  no `msiexec`. Su firma se verificó en la 2.0.0.
+- **QGIS 4.x instalado de verdad** junto a la 3.44: solo simulado.
+- **Qué pasa cuando Anthropic cambie la forma de publicar** (nombre del
+  `Setup.exe`, formato de `RELEASES`): el instalador cae a la guía manual con
+  código 2, pero esa rama solo se ejerció simulando que no se resuelve la URL.
+- **Que la «última estable» del canal `RELEASES` no sea una versión en
+  despliegue gradual.** Es **inferencia**: el archivo lista una sola versión
+  `full` y es el mismo que usa la aplicación para actualizarse; no hay otro
+  canal publicado que distinga «estable» de «beta».
+- **Claude Desktop con administrador / MSIX preexistente que haya que
+  actualizar:** solo avisa (no puede actualizarlo sin administrador).
+- Windows 10, Windows en portugués, proxy corporativo, antivirus de terceros,
+  `Setup.exe` de Claude bajo otras políticas de Smart App Control (en este equipo
+  corrió sin problema; la decisión es del servicio en la nube de Microsoft).
+
+## Parte 3 — Qué se probó en la versión 2.0.0 (historial)
+
+Lo que sigue es el estado de la 2.0.0; **el paso 1 y los pendientes de Claude
+Desktop descritos aquí quedaron superados por la 2.1.0** (arriba).
 
 Equipo de prueba (2026-11-18): Windows 11 Pro 10.0.26200, cuenta **sin
 administrador**, **Smart App Control activado**, sin QGIS instalado, Python 3.12

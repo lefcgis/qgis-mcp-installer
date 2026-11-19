@@ -74,13 +74,9 @@ MSG: dict[str, dict[str, str]] = {
                   "pt": "O download automático do uv só está previsto para Windows."},
     # ── estados (aparecen en el RESUMEN) ─────────────────────────────────
     "st.present": {"es": "ya presente{v}", "pt": "já presente{v}"},
-    "st.installed": {"es": "instalado", "pt": "instalado"},
     "st.installed_manual": {"es": "instalado a mano", "pt": "instalado manualmente"},
     "st.manual_pending": {"es": "PENDIENTE: instálalo a mano",
                           "pt": "PENDENTE: instale manualmente"},
-    "st.installed_msi": {"es": "instalado (MSI)", "pt": "instalado (MSI)"},
-    "st.installed_user": {"es": "instalado sin admin en {root}",
-                          "pt": "instalado sem admin em {root}"},
     "st.venv": {"es": "uv + Python {py} propio", "pt": "uv + Python {py} próprio"},
     "st.configs": {"es": "{n} archivo(s) de configuración",
                    "pt": "{n} arquivo(s) de configuração"},
@@ -93,18 +89,6 @@ MSG: dict[str, dict[str, str]] = {
                              "instalación; se configurará en el paso 6.",
                        "pt": "Usando o seu Claude Desktop existente{v}. A instalação "
                              "será pulada; ele será configurado no passo 6."},
-    "s1.dry": {"es": "[dry-run] instalaría el paquete MSIX oficial de Claude Desktop.",
-               "pt": "[dry-run] instalaria o pacote MSIX oficial do Claude Desktop."},
-    "s1.noadmin": {"es": "Sin permisos de administrador Windows no admite la instalación "
-                         "automática de Claude Desktop (su paquete registra un servicio).",
-                   "pt": "Sem permissões de administrador o Windows não aceita a instalação "
-                         "automática do Claude Desktop (o pacote registra um serviço)."},
-    "s1.dry_manual": {"es": "[dry-run] abriría {url} para que lo instales a mano.",
-                      "pt": "[dry-run] abriria {url} para você instalar manualmente."},
-    "s1.running": {"es": "Instalando Claude Desktop (paquete MSIX, para todo el equipo)…",
-                   "pt": "Instalando o Claude Desktop (pacote MSIX, para todo o computador)…"},
-    "s1.autofail": {"es": "Windows no permitió la instalación automática: {reason}",
-                    "pt": "O Windows não permitiu a instalação automática: {reason}"},
     "s1.manual": {"es": "Instala Claude Desktop a mano desde {url} (es un instalador "
                         "normal: siguiente, siguiente). El resto de pasos continúa.",
                   "pt": "Instale o Claude Desktop manualmente em {url} (é um instalador "
@@ -113,17 +97,12 @@ MSG: dict[str, dict[str, str]] = {
                              "pulsa Enter (o Enter ahora para dejarlo para después): ",
                        "pt": "  Abri a página de download. Quando terminar de instalar, "
                              "pressione Enter (ou Enter agora para deixar para depois): "},
-    "s1.ok": {"es": "Claude Desktop instalado.", "pt": "Claude Desktop instalado."},
     "w.claude": {"es": "Falta instalar Claude Desktop: {url}. Cuando lo instales no hace "
                        "falta volver a ejecutar este instalador.",
                  "pt": "Falta instalar o Claude Desktop: {url}. Depois de instalá-lo não é "
                        "preciso executar este instalador de novo."},
     # ── paso 2 ───────────────────────────────────────────────────────────
     "s2.title": {"es": "QGIS {v} LTR", "pt": "QGIS {v} LTR"},
-    "s2.old": {"es": "Tu QGIS ({v}) es anterior a 3.28; el plugin exige >= 3.28. "
-                     "Puede que no cargue. Considera actualizar.",
-               "pt": "Seu QGIS ({v}) é anterior ao 3.28; o plugin exige >= 3.28. "
-                     "Ele pode não carregar. Considere atualizar."},
     "s2.existing_ok": {"es": "Usas tu QGIS existente{v}. Se omite la instalación; "
                              "el plugin se desplegará en tu perfil.",
                        "pt": "Usando o seu QGIS existente{v}. A instalação será "
@@ -175,6 +154,131 @@ MSG: dict[str, dict[str, str]] = {
                            "Escolha uma pasta raiz mais curta, por exemplo C:\\qgis-mcp."},
     "o4w.nobin": {"es": " y no se encontró el binario de QGIS",
                   "pt": " e o binário do QGIS não foi encontrado"},
+    # ── pasos 1 y 2 (versión 2.1.0: Claude por usuario, QGIS 3.44 verificado) ──
+    "run.timeout": {"es": "{exe} no terminó en {n} s y se detuvo.",
+                    "pt": "{exe} não terminou em {n} s e foi interrompido."},
+    "st.claude_installed": {"es": "instalado v{v} (firmado por Anthropic)",
+                            "pt": "instalado v{v} (assinado pela Anthropic)"},
+    "st.installed_msi": {"es": "instalado (MSI) v{v}", "pt": "instalado (MSI) v{v}"},
+    "st.installed_user": {"es": "instalado sin admin v{v} en {root}",
+                          "pt": "instalado sem admin v{v} em {root}"},
+    "s1.dry": {"es": "[dry-run] consultaría la última versión del canal oficial ({feed}), "
+                     "descargaría el Setup.exe vigente (se obtiene de {url}), "
+                     "comprobaría su firma y lo instalaría POR USUARIO, sin administrador; "
+                     "después lo llevaría a la última versión del canal.",
+               "pt": "[dry-run] consultaria a última versão do canal oficial ({feed}), "
+                     "baixaria o Setup.exe vigente (obtido de {url}), verificaria a "
+                     "assinatura e o instalaria POR USUÁRIO, sem administrador; depois o "
+                     "levaria à última versão do canal."},
+    "s1.nofeed": {"es": "No pude leer el canal oficial de versiones de Claude Desktop "
+                        "(¿sin internet o proxy?). No se puede comprobar si es la última.",
+                  "pt": "Não consegui ler o canal oficial de versões do Claude Desktop "
+                        "(sem internet ou proxy?). Não é possível verificar se é a última."},
+    "s1.nourl": {"es": "No pude resolver la dirección oficial del instalador de Claude "
+                       "Desktop (¿sin internet o proxy?).",
+                 "pt": "Não consegui resolver o endereço oficial do instalador do Claude "
+                       "Desktop (sem internet ou proxy?)."},
+    "s1.running": {"es": "Instalando Claude Desktop para tu usuario (no requiere administrador)…",
+                   "pt": "Instalando o Claude Desktop para o seu usuário (não requer administrador)…"},
+    "s1.autofail": {"es": "El instalador de Claude Desktop no dejó la aplicación instalada ({reason}).",
+                    "pt": "O instalador do Claude Desktop não deixou o aplicativo instalado ({reason})."},
+    "s1.updating": {"es": "Actualizando Claude Desktop a la última versión del canal oficial ({v})…",
+                    "pt": "Atualizando o Claude Desktop para a última versão do canal oficial ({v})…"},
+    "s1.update_fail": {"es": "Claude Desktop quedó en {v}, pero el canal oficial publica {latest}; "
+                             "no se pudo actualizar ahora.",
+                       "pt": "O Claude Desktop ficou na {v}, mas o canal oficial publica a {latest}; "
+                             "não foi possível atualizar agora."},
+    "w.claude_update": {"es": "Claude Desktop quedó en la versión {v} y la última publicada es "
+                              "{latest}. Ábrelo: se actualiza solo, o vuelve a ejecutar este "
+                              "instalador.",
+                        "pt": "O Claude Desktop ficou na versão {v} e a última publicada é "
+                              "{latest}. Abra-o: ele se atualiza sozinho, ou execute este "
+                              "instalador de novo."},
+    "s1.is_latest": {"es": "Claude Desktop {v} es la última versión estable publicada.",
+                     "pt": "O Claude Desktop {v} é a última versão estável publicada."},
+    "s1.outdated": {"es": "Tu Claude Desktop ({v}) es anterior a la última publicada ({latest}) "
+                          "y es una instalación que este instalador no puede actualizar sin "
+                          "administrador. Actualízalo desde la propia aplicación o reinstálalo "
+                          "desde claude.com/download.",
+                    "pt": "Seu Claude Desktop ({v}) é anterior à última publicada ({latest}) e "
+                          "é uma instalação que este instalador não consegue atualizar sem "
+                          "administrador. Atualize pelo próprio aplicativo ou reinstale em "
+                          "claude.com/download."},
+    "s1.binver": {"es": "Ejecutable instalado: {path} (versión {v})",
+                  "pt": "Executável instalado: {path} (versão {v})"},
+    "s1.ok": {"es": "Claude Desktop instalado (v{v}).", "pt": "Claude Desktop instalado (v{v})."},
+    "s2.other_series": {"es": "Hay un QGIS {v}, pero este instalador garantiza la serie "
+                              "{series} LTR: se instalará aparte, sin tocar el otro.",
+                        "pt": "Há um QGIS {v}, mas este instalador garante a série {series} "
+                              "LTR: ela será instalada à parte, sem mexer no outro."},
+    "s2.not_series": {"es": "Indicaste QGIS {v}, que no es de la serie {series} LTR: se "
+                            "instalará la {series}.",
+                      "pt": "Você indicou o QGIS {v}, que não é da série {series} LTR: a "
+                            "{series} será instalada."},
+    "s2.unverified": {"es": "No se pudo leer la versión de ese QGIS: no se comprobó que sea 3.44.",
+                      "pt": "Não foi possível ler a versão desse QGIS: não foi verificado que seja 3.44."},
+    "s2.latest_ok": {"es": "QGIS {v} es el último parche publicado de la serie 3.44 LTR.",
+                     "pt": "O QGIS {v} é o último patch publicado da série 3.44 LTR."},
+    "s2.patch_available": {"es": "Hay un parche más nuevo de 3.44 LTR ({latest}); tienes {v}. "
+                                 "Actualízalo con el instalador de QGIS o con OSGeo4W.",
+                           "pt": "Há um patch mais novo do 3.44 LTR ({latest}); você tem a {v}. "
+                                 "Atualize com o instalador do QGIS ou o OSGeo4W."},
+    "s2.running_skip": {"es": "Hay un parche más nuevo ({latest}; tienes {v}) pero QGIS está "
+                              "abierto: ciérralo y vuelve a ejecutar para actualizarlo.",
+                        "pt": "Há um patch mais novo ({latest}; você tem a {v}) mas o QGIS está "
+                              "aberto: feche-o e execute de novo para atualizar."},
+    "s2.upgrading": {"es": "Actualizando QGIS {v} → {latest} (último parche de la serie 3.44 LTR)…",
+                     "pt": "Atualizando o QGIS {v} → {latest} (último patch da série 3.44 LTR)…"},
+    "msi.resolved": {"es": "Último MSI de la serie 3.44 en qgis.org: {v}-{b}",
+                     "pt": "Último MSI da série 3.44 em qgis.org: {v}-{b}"},
+    "msi.noindex": {"es": "No pude leer el índice de descargas de qgis.org; uso la última "
+                          "versión verificada: {v}-{b}.",
+                    "pt": "Não consegui ler o índice de downloads do qgis.org; uso a última "
+                          "versão verificada: {v}-{b}."},
+    "o4w.noindex": {"es": "No pude leer el índice del repositorio OSGeo4W; la versión se "
+                          "comprobará al terminar.",
+                    "pt": "Não consegui ler o índice do repositório OSGeo4W; a versão será "
+                          "verificada ao terminar."},
+    "o4w.resolved": {"es": "El repositorio OSGeo4W sirve qgis-ltr {v}.",
+                     "pt": "O repositório OSGeo4W serve o qgis-ltr {v}."},
+    "o4w.series_changed": {"es": "El paquete qgis-ltr del repositorio OSGeo4W ya es la {v}, que "
+                                 "no es de la serie {series} LTR. No se instala para no dejar "
+                                 "otra versión. Usa el MSI oficial de la serie {series} "
+                                 "(--qgis-install msi, con administrador) o espera una "
+                                 "versión nueva de este instalador.",
+                           "pt": "O pacote qgis-ltr do repositório OSGeo4W já é a {v}, que não "
+                                 "é da série {series} LTR. Não será instalado para não deixar "
+                                 "outra versão. Use o MSI oficial da série {series} "
+                                 "(--qgis-install msi, com administrador) ou aguarde uma nova "
+                                 "versão deste instalador."},
+    "qv.dry": {"es": "[dry-run] resolvería el último parche de la serie {series} y, al terminar, "
+                     "leería la versión del binario: si no es {series}.x, el paso falla.",
+               "pt": "[dry-run] resolveria o último patch da série {series} e, ao terminar, "
+                     "leria a versão do binário: se não for {series}.x, o passo falha."},
+    "qv.ok": {"es": "Versión comprobada en el binario: QGIS {v} (serie {series} LTR).",
+              "pt": "Versão verificada no binário: QGIS {v} (série {series} LTR)."},
+    "qv.unreadable": {"es": "QGIS se instaló pero no pude leer su versión en {root}.",
+                      "pt": "O QGIS foi instalado mas não consegui ler a versão em {root}."},
+    "qv.wrong": {"es": "Quedó instalado QGIS {v}, que NO es de la serie {series} LTR.",
+                 "pt": "Ficou instalado o QGIS {v}, que NÃO é da série {series} LTR."},
+    "s7.qgis_ok": {"es": "QGIS {v} (serie {series} LTR, leída del binario) en {path}",
+                   "pt": "QGIS {v} (série {series} LTR, lida do binário) em {path}"},
+    "s7.qgis_wrong": {"es": "El QGIS instalado es {v}, NO de la serie {series} LTR.",
+                      "pt": "O QGIS instalado é o {v}, NÃO da série {series} LTR."},
+    "s7.qgis_missing": {"es": "No se encontró QGIS {series} LTR en este equipo.",
+                        "pt": "O QGIS {series} LTR não foi encontrado neste computador."},
+    "s7.qgis_assumed": {"es": "No se pudo comprobar la versión de QGIS (--assume-installed).",
+                        "pt": "Não foi possível verificar a versão do QGIS (--assume-installed)."},
+    "s7.claude_ok": {"es": "Claude Desktop {v} en {loc}",
+                     "pt": "Claude Desktop {v} em {loc}"},
+    "s7.claude_latest": {"es": "Es la última versión estable publicada ({v}).",
+                         "pt": "É a última versão estável publicada ({v})."},
+    "s7.claude_old": {"es": "Claude Desktop {v}: el canal oficial ya publica {latest}.",
+                      "pt": "Claude Desktop {v}: o canal oficial já publica a {latest}."},
+    "s7.claude_missing": {"es": "Claude Desktop no está instalado (pendiente del paso 1).",
+                          "pt": "O Claude Desktop não está instalado (pendente do passo 1)."},
+    "s7.claude_sig_bad": {"es": "La firma de {path} NO es válida de Anthropic.",
+                          "pt": "A assinatura de {path} NÃO é válida da Anthropic."},
     # ── paso 3 ───────────────────────────────────────────────────────────
     "s3.title": {"es": "Entorno de Python del servidor (aislado)",
                  "pt": "Ambiente Python do servidor (isolado)"},

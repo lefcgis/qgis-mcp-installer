@@ -44,45 +44,91 @@ class Download:
 # Versiones fijadas
 # ─────────────────────────────────────────────────────────────────────────────
 
-QGIS_VERSION = "3.44.15"  # LTR, rama 3.44. Última publicada al 2026-11-18.
+# La serie que este instalador garantiza. NO es "la última de QGIS" (hoy la
+# estable más nueva es la 4.x): es la 3.44 LTR, que es la que usa el plugin y el
+# taller. El instalador resuelve en tiempo de ejecución el ÚLTIMO PARCHE de esta
+# serie y, tras instalar, lee la versión del binario y exige que sea 3.44.x.
+QGIS_SERIES = (3, 44)
+QGIS_SERIES_TEXT = "3.44"
+
+# Último parche conocido de la serie, verificado el 2026-11-18. Solo se usa como
+# respaldo si no se puede leer el índice de descargas de qgis.org.
+QGIS_VERSION = "3.44.15"
 QGIS_BUILD = "2"
+
+# Índice oficial de MSI (listado HTML) y paquete LTR del repositorio OSGeo4W.
+# Con ellos se resuelve el último 3.44.x sin tener una versión fijada a mano.
+QGIS_DOWNLOADS_INDEX = "https://download.qgis.org/downloads/"
+QGIS_MSI_URL_TEMPLATE = "https://download.qgis.org/downloads/QGIS-OSGeo4W-{version}-{build}.msi"
+QGIS_MSI_NAME_RE = r"QGIS-OSGeo4W-(\d+\.\d+\.\d+)-(\d+)\.msi"
+OSGEO4W_SETUP_INI = "https://download.osgeo.org/osgeo4w/v2/x86_64/setup.ini.bz2"
+OSGEO4W_LTR_PACKAGE = "qgis-ltr"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Paso 1 — Claude Desktop (Windows x64)
-# Desde 2026 Claude Desktop para Windows se distribuye como paquete MSIX. Esta
-# es la URL que documenta Anthropic en "Deploy Claude Desktop for Windows"
-# (support.claude.com/en/articles/12622703); redirige a downloads.claude.ai.
-# No hay checksum público -> confiamos en la firma del paquete ("Anthropic").
+#
+# Anthropic publica dos formas de instalar Claude Desktop en Windows, ambas en
+# downloads.claude.ai y ambas firmadas por «Anthropic, PBC»:
+#
+#   · MSIX (la que documenta "Deploy Claude Desktop for Windows",
+#     support.claude.com/en/articles/12622703): registra un servicio de Windows,
+#     por eso SIN administrador falla con 0x80073D28 («Administrator privileges
+#     required to install packaged service», registro AppXDeployment-Server,
+#     eventos 404/605 «Failure in the Approved state handler»). Además el
+#     redirect «msix/latest» va por detrás del canal de actualizaciones.
+#   · Setup.exe (Squirrel.Windows): el instalador por usuario que usa el botón
+#     de claude.com/download. Instala en %LOCALAPPDATA%\AnthropicClaude, NO pide
+#     administrador y se mantiene al día con el canal RELEASES.
+#
+# El instalador usa la segunda. La URL del Setup.exe de una versión tiene el
+# mismo nombre (hash incluido) que su MSIX con otra extensión, así que se obtiene
+# del redirect documentado cambiando .msix por .exe. Como ese redirect puede ir
+# una versión por detrás, después de instalar se aplica la actualización del
+# canal oficial (RELEASES) con el propio Update.exe y se comprueba que la versión
+# instalada es la que publica el canal.
+#
+# No hay checksum público -> la garantía es la firma Authenticode ("Anthropic").
+# Verificado el 2026-11-18: canal = 6.6395.1; redirect MSIX/Setup = 5.11492.5.
 # ─────────────────────────────────────────────────────────────────────────────
 
-CLAUDE_DESKTOP = Download(
-    key="claude_desktop",
-    name="Claude Desktop (Windows x64, MSIX)",
-    url="https://claude.ai/api/desktop/win32/x64/msix/latest/redirect",
-    filename="Claude.msix",
-    expected_publisher_contains="Anthropic",
+CLAUDE_MSIX_REDIRECT = "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect"
+CLAUDE_RELEASES_BASE = "https://downloads.claude.ai/releases/win32/x64"
+CLAUDE_RELEASES_FEED = CLAUDE_RELEASES_BASE + "/RELEASES"
+CLAUDE_DOWNLOAD_HOST = "downloads.claude.ai"
+CLAUDE_PUBLISHER = "Anthropic"
+
+CLAUDE_SETUP = Download(
+    key="claude_setup",
+    # La URL real se resuelve en tiempo de ejecución (ver arriba); esta es la
+    # del redirect documentado y solo sirve para que el plan en seco la muestre.
+    name="Claude Desktop (Windows x64, Setup.exe por usuario)",
+    url=CLAUDE_MSIX_REDIRECT,
+    filename="Claude-Setup.exe",
+    expected_publisher_contains=CLAUDE_PUBLISHER,
     sha256=None,  # "latest": sube de versión; la firma es la garantía
-    expected_size=299_362_172,  # ~285 MB observado el 2026-11-18 (cordura)
+    expected_size=267_307_680,  # ~255 MB observado el 2026-11-18 (cordura)
     cache=False,
-    notes="Paquete MSIX. Se instala con Add-AppxPackage (por usuario) o "
-          "Add-AppxProvisionedPackage (toda la máquina, requiere administrador).",
+    notes="Instalador Squirrel por usuario, sin administrador. Se ejecuta con "
+          "--silent y luego Update.exe --update contra el canal oficial.",
 )
 
 # Página oficial para la instalación manual cuando la automática no es posible.
 CLAUDE_DOWNLOAD_PAGE = "https://claude.com/download"
 # Nombre de familia del paquete MSIX de Claude Desktop (identifica su carpeta
-# de datos en %LOCALAPPDATA%\Packages).
+# de datos en %LOCALAPPDATA%\Packages). Solo se usa para detectar y configurar
+# instalaciones MSIX que ya existan.
 CLAUDE_MSIX_FAMILY = "Claude_pzs8sxrjxfjjc"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Paso 2 — QGIS 3.44 LTR (instalador MSI de OSGeo4W, todo-en-uno con Python/GDAL)
-# download.qgis.org redirige (302) a un mirror; el MSI está firmado por QGIS.ORG.
+# download.qgis.org redirige (302) a un mirror; el MSI está firmado por la OSGeo
+# Foundation. La URL se resuelve en tiempo de ejecución al último 3.44.x.
 # ─────────────────────────────────────────────────────────────────────────────
 
 QGIS_LTR = Download(
     key="qgis_ltr",
     name=f"QGIS {QGIS_VERSION} LTR (OSGeo4W MSI)",
-    url=f"https://download.qgis.org/downloads/QGIS-OSGeo4W-{QGIS_VERSION}-{QGIS_BUILD}.msi",
+    url=QGIS_MSI_URL_TEMPLATE.format(version=QGIS_VERSION, build=QGIS_BUILD),
     filename=f"QGIS-OSGeo4W-{QGIS_VERSION}-{QGIS_BUILD}.msi",
     # El MSI lo firma la OSGeo Foundation, no "QGIS": con "QGIS" la verificación
     # rechazaba el instalador legítimo (visto en campo el 2026-08-31).
@@ -118,6 +164,8 @@ OSGEO4W_SETUP = Download(
 # Repositorio oficial de paquetes OSGeo4W (v2) y meta-paquete a instalar.
 # qgis-ltr-full = QGIS LTR completo (equivalente al contenido del MSI).
 OSGEO4W_SITE = "https://download.osgeo.org/osgeo4w/v2"
+# `qgis-ltr-full` instala `qgis-ltr`: es el paquete cuya versión se comprueba.
+# Ojo: `qgis` (sin -ltr) ya es la serie 4.x; nunca se pide.
 OSGEO4W_PACKAGES = "qgis-ltr-full"
 # Longitud máxima de la carpeta donde OSGeo4W instala o guarda paquetes. Sus
 # rutas internas llegan a ~180 caracteres y Windows corta en 260 (MAX_PATH).
@@ -207,6 +255,6 @@ MCP_SERVER_NAME = "qgis"
 
 DOWNLOADS: dict[str, Download] = {
     d.key: d
-    for d in (CLAUDE_DESKTOP, QGIS_LTR, OSGEO4W_SETUP, UV, PLUGIN_FORK,
+    for d in (CLAUDE_SETUP, QGIS_LTR, OSGEO4W_SETUP, UV, PLUGIN_FORK,
               PLUGIN_UPSTREAM)
 }
